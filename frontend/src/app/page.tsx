@@ -22,9 +22,9 @@ function MainLauncherContent() {
     setUser(verifiedUser);
     setToken(authToken);
 
-    // Fetch changelogs from backend API (without dummy 'cs2' slug)
+    // Fetch changelogs for product 6a943ac671805d202d5fc1e0 from backend API
     try {
-      const logs = await ipc.getChangelogs(undefined, authToken);
+      const logs = await ipc.getChangelogs('6a943ac671805d202d5fc1e0', authToken);
       if (Array.isArray(logs) && logs.length > 0) {
         setChangelogs(logs);
       } else {

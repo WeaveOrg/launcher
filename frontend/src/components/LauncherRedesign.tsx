@@ -26,9 +26,9 @@ export const LauncherRedesign: React.FC<LauncherRedesignProps> = ({
   const safeApps = Array.isArray(apps) ? apps : [];
   const safeChangelogs = Array.isArray(changelogs) ? changelogs : [];
 
-  // CS2 is the primary app
-  const cs2App = safeApps.find(a => a?.name?.includes('Counter') || a?.name?.includes('CS')) || ({
-    id: 'cs2',
+  // CS2 is the primary app (ObjectID: 6a943ac671805d202d5fc1e0)
+  const cs2App = safeApps.find(a => a?.id === '6a943ac671805d202d5fc1e0' || a?.name?.includes('Counter') || a?.name?.includes('CS')) || ({
+    id: '6a943ac671805d202d5fc1e0',
     name: 'Counter-Strike 2',
     processName: 'cs2.exe',
     status: 'Undetected',
