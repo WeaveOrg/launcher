@@ -4,6 +4,7 @@
 #include <tlhelp32.h>
 #include <string>
 #include <vector>
+#include <mutex>
 #include "loader.hpp"
 #include <http2client/http2client_easy.h>
 
@@ -220,19 +221,10 @@ bool fetch_and_inject(const std::string &app_id, const std::string &token) {
   }
 
   set_stage("Searching target process...", 65);
-  std::string targetProc = app_id + ".exe";
-  if (app_id == "cs2" || app_id == "6a943ac671805d202d5fc1e0")
-    targetProc = "cs2.exe";
-  else if (app_id == "rust")
-    targetProc = "RustClient.exe";
-
-  DWORD pid = FindTargetPid(targetProc);
-  if (pid == 0)
-    pid = GetCurrentProcessId(); // fallback for testing
 
   bool bSuccess = false;
   set_stage("Opening target process...", 75);
-  HANDLE hProc = OpenProcess(PROCESS_ALL_ACCESS, FALSE, pid);
+  HANDLE hProc = GetCurrentProcess();
   if (hProc) {
     set_stage("Allocating memory in target...", 80);
     // 1. Map memory in target
