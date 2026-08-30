@@ -9,13 +9,15 @@ const BACKEND_BASE_URL =
 export async function GET(request: NextRequest) {
   try {
     // 1. Extract token from query param, cookies, or header
-    const token = 
+    const rawToken = 
       request.nextUrl.searchParams.get('token') ||
       request.nextUrl.searchParams.get('launcher_token') ||
       request.cookies.get('launcher_token')?.value ||
       request.headers.get('x-launcher-token') || 
       request.headers.get('authorization')?.replace(/^Bearer\s+/i, '') ||
       '';
+
+    const token = rawToken.trim().replace(/^['"]|['"]$/g, '');
 
     if (!token) {
       return NextResponse.json(
@@ -27,17 +29,20 @@ export async function GET(request: NextRequest) {
       );
     }
 
-    // 2. Strict backend URL: GET /api/launcher/profile
+    // 2. Build target URL with token in query params
     const baseUrl = BACKEND_BASE_URL.replace(/\/+$/, '');
-    const targetUrl = `${baseUrl}/api/launcher/profile`;
+    const url = new URL(`${baseUrl}/api/launcher/profile`);
+    url.searchParams.set('token', token);
+    url.searchParams.set('launcher_token', token);
 
-    // 3. Strict header: X-Launcher-Token: <launcher_token>
+    // 3. Send headers as well (covers all backend implementations)
     const headers: Record<string, string> = {
       'Accept': 'application/json',
       'X-Launcher-Token': token,
+      'Authorization': `Bearer ${token}`,
     };
 
-    const response = await fetch(targetUrl, {
+    const response = await fetch(url.toString(), {
       method: 'GET',
       headers,
       cache: 'no-store',
@@ -56,7 +61,7 @@ export async function GET(request: NextRequest) {
         data || { 
           error: 'Backend returned non-OK status', 
           status: response.status,
-          targetUrl,
+          targetUrl: url.toString(),
           details: responseText || response.statusText 
         },
         { status: response.status }

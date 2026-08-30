@@ -9,7 +9,7 @@ const BACKEND_BASE_URL =
 export async function GET(request: NextRequest) {
   try {
     // 1. Extract token from query param, cookies, or header
-    const token = 
+    const rawToken = 
       request.nextUrl.searchParams.get('token') ||
       request.nextUrl.searchParams.get('launcher_token') ||
       request.cookies.get('launcher_token')?.value ||
@@ -17,23 +17,29 @@ export async function GET(request: NextRequest) {
       request.headers.get('authorization')?.replace(/^Bearer\s+/i, '') ||
       '';
 
+    const token = rawToken.trim().replace(/^['"]|['"]$/g, '');
     const productId = request.nextUrl.searchParams.get('product_id');
 
-    // 2. Strict backend URL: GET /api/launcher/changelogs?product_id=...
+    // 2. Build target URL with product_id and token query params
     const baseUrl = BACKEND_BASE_URL.replace(/\/+$/, '');
     const url = new URL(`${baseUrl}/api/launcher/changelogs`);
 
     if (productId) {
       url.searchParams.set('product_id', productId);
     }
+    if (token) {
+      url.searchParams.set('token', token);
+      url.searchParams.set('launcher_token', token);
+    }
 
-    // 3. Strict header: X-Launcher-Token: <launcher_token>
+    // 3. Send headers as well
     const headers: Record<string, string> = {
       'Accept': 'application/json',
     };
 
     if (token) {
       headers['X-Launcher-Token'] = token;
+      headers['Authorization'] = `Bearer ${token}`;
     }
 
     const response = await fetch(url.toString(), {
