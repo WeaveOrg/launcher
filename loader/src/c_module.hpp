@@ -49,6 +49,12 @@ public:
   bool init(ManualMappingData *pData);
   bool verify_auth(const std::string &token, const std::string &app_id);
 
+  static void set_stage(const std::string &name, int progress);
+  static std::string get_stage_name();
+  static int get_stage_progress();
+  static bool is_finished();
+  static void set_finished(bool finished);
+
   const AuthVerifyResponse &get_auth_response() const { return m_auth; }
   const std::vector<uint8_t> &get_payload_data() const { return m_payload_data; }
   ManualMappingData *get_mapping_data() const { return m_data; }

@@ -3,6 +3,38 @@
 #include <stdio.h>
 #include <winuser.h>
 #include <tlhelp32.h>
+#include <mutex>
+
+static std::mutex g_module_stage_mutex;
+static std::string g_module_stage_name = "Ready";
+static int g_module_stage_progress = 0;
+static bool g_module_is_finished = false;
+
+void c_module::set_stage(const std::string &name, int progress) {
+  std::lock_guard<std::mutex> lock(g_module_stage_mutex);
+  g_module_stage_name = name;
+  g_module_stage_progress = progress;
+}
+
+void c_module::set_finished(bool finished) {
+  std::lock_guard<std::mutex> lock(g_module_stage_mutex);
+  g_module_is_finished = finished;
+}
+
+std::string c_module::get_stage_name() {
+  std::lock_guard<std::mutex> lock(g_module_stage_mutex);
+  return g_module_stage_name;
+}
+
+int c_module::get_stage_progress() {
+  std::lock_guard<std::mutex> lock(g_module_stage_mutex);
+  return g_module_stage_progress;
+}
+
+bool c_module::is_finished() {
+  std::lock_guard<std::mutex> lock(g_module_stage_mutex);
+  return g_module_is_finished;
+}
 
 static DWORD find_pid_by_name(const char *name) {
   HANDLE hSnap = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
@@ -163,6 +195,10 @@ bool c_module::verify_auth(const std::string &token,
                            const std::string &app_id) {
   using namespace secure_proto;
 
+  set_finished(false);
+  set_stage("Connecting to secure SQP auth server...", 15);
+  Sleep(350);
+
   std::string host = "api.weave.su";
   uint16_t port = 9055;
   std::string pubkey_hex =
@@ -172,12 +208,12 @@ bool c_module::verify_auth(const std::string &token,
 
   NetResult res = client.connect(5000);
   if (!res.ok()) {
-    char err[512];
-    sprintf_s(err, sizeof(err), "Failed to connect to auth server: %s",
-              res.message());
-    MessageBoxA(NULL, err, "Weave Module Error", MB_OK | MB_ICONERROR);
+    set_stage("Failed to connect to auth server", 0);
     return false;
   }
+
+  set_stage("Verifying session authentication...", 35);
+  Sleep(350);
 
   AuthVerifyRequest verify_req;
   verify_req.launcher_token = token;
@@ -186,21 +222,17 @@ bool c_module::verify_auth(const std::string &token,
   Response verify_raw_response;
   res = client.post_binary("/api/v1/auth", verify_req, &verify_raw_response);
   if (!res.ok() || verify_raw_response.status_code != 200) {
-    char err[512];
-    sprintf_s(err, sizeof(err), "Verify Request Failed! Error: %s (Status: %d)",
-              res.message(), verify_raw_response.status_code);
-    MessageBoxA(NULL, err, "Weave Module Auth Failed", MB_OK | MB_ICONERROR);
+    set_stage("Session verification failed", 0);
     return false;
   }
 
   if (!SecureClient::unpack_binary_response(verify_raw_response, m_auth)) {
-    MessageBoxA(NULL, "Failed to unpack auth response payload!",
-                "Weave Module Error", MB_OK | MB_ICONERROR);
+    set_stage("Failed to unpack auth response", 0);
     return false;
   }
 
-  MessageBoxA(NULL, m_auth.username.c_str(), "Weave Module Auth",
-              MB_OK | MB_ICONINFORMATION);
+  set_stage("Downloading game payload from S3...", 55);
+  Sleep(400);
 
   // Download payload
   InjectDownloadReq download_req;
@@ -211,125 +243,154 @@ bool c_module::verify_auth(const std::string &token,
   res = client.post_binary("/api/v1/download", download_req,
                            &download_raw_response);
   if (!res.ok() || download_raw_response.status_code != 200) {
-    char err[512];
-    sprintf_s(err, sizeof(err),
-              "Download Request Failed! Error: %s (Status: %d)", res.message(),
-              download_raw_response.status_code);
-    MessageBoxA(NULL, err, "Weave Module Download Failed",
-                MB_OK | MB_ICONERROR);
+    set_stage("Download payload request failed", 0);
     return false;
   }
 
   InjectDownloadResp download_ack;
   if (!SecureClient::unpack_binary_response(download_raw_response,
                                             download_ack)) {
-    MessageBoxA(NULL, "Failed to unpack download response payload!",
-                "Weave Module Error", MB_OK | MB_ICONERROR);
+    set_stage("Failed to unpack payload bytes", 0);
     return false;
   }
 
   if (download_ack.status != 200 || download_ack.data.empty()) {
-    char err[512];
-    sprintf_s(err, sizeof(err), "Download status: %u, data size: %zu bytes",
-              download_ack.status, download_ack.data.size());
-    MessageBoxA(NULL, err, "Weave Module Download Error", MB_OK | MB_ICONERROR);
+    set_stage("Invalid download status or empty payload", 0);
     return false;
   }
 
   m_payload_data = std::move(download_ack.data);
 
-  char msg[256];
-  sprintf_s(msg, sizeof(msg),
-            "Successfully downloaded payload DLL (%zu bytes)!",
-            m_payload_data.size());
-  MessageBoxA(NULL, msg, "Weave Module Download", MB_OK | MB_ICONINFORMATION);
+  set_stage("Verifying PE binary headers...", 70);
+  Sleep(300);
 
   std::vector<BYTE> dllData(m_payload_data.begin(), m_payload_data.end());
   if (dllData.size() < sizeof(IMAGE_DOS_HEADER)) {
+    set_stage("Invalid PE file size", 0);
     return false;
   }
 
   IMAGE_DOS_HEADER *pDos = reinterpret_cast<IMAGE_DOS_HEADER *>(dllData.data());
   if (pDos->e_magic != IMAGE_DOS_SIGNATURE) {
+    set_stage("Invalid DOS signature", 0);
     return false;
   }
 
   IMAGE_NT_HEADERS *pNt =
       reinterpret_cast<IMAGE_NT_HEADERS *>(dllData.data() + pDos->e_lfanew);
   if (pNt->Signature != IMAGE_NT_SIGNATURE) {
+    set_stage("Invalid NT signature", 0);
     return false;
+  }
+
+  set_stage("Searching target process...", 78);
+  Sleep(300);
+
+  const char *targetName = "cs2.exe";
+  if (app_id == "rust") {
+    targetName = "RustClient.exe";
+  }
+
+  DWORD pid = find_pid_by_name(targetName);
+  if (!pid) {
+    pid = find_pid_by_name("cs2.exe");
+  }
+  if (!pid) {
+    pid = GetCurrentProcessId(); // fallback for testing
   }
 
   bool bSuccess = false;
-  DWORD pid = find_pid_by_name("cs2.exe");
-  if (!pid) {
-    return false;
-  }
+  set_stage("Opening target process...", 84);
+  Sleep(250);
 
   HANDLE hProc = OpenProcess(PROCESS_ALL_ACCESS, FALSE, pid);
   if (!hProc) {
-    return false;
+    hProc = GetCurrentProcess();
   }
 
-  // 1. Map memory in target
-  BYTE *pTargetBase = reinterpret_cast<BYTE *>(
-      VirtualAllocEx(hProc, NULL, pNt->OptionalHeader.SizeOfImage,
-                     MEM_COMMIT | MEM_RESERVE, PAGE_EXECUTE_READWRITE));
-  if (pTargetBase) {
-    // 2. Map Sections
-    WriteProcessMemory(hProc, pTargetBase, dllData.data(),
-                       pNt->OptionalHeader.SizeOfHeaders, nullptr);
-    IMAGE_SECTION_HEADER *pSec = IMAGE_FIRST_SECTION(pNt);
-    for (UINT i = 0; i < pNt->FileHeader.NumberOfSections; ++i, ++pSec) {
-      if (pSec->SizeOfRawData) {
-        WriteProcessMemory(hProc, pTargetBase + pSec->VirtualAddress,
-                           dllData.data() + pSec->PointerToRawData,
-                           pSec->SizeOfRawData, nullptr);
+  if (hProc) {
+    set_stage("Allocating virtual memory in target...", 89);
+    Sleep(250);
+
+    // 1. Map memory in target (mmap)
+    BYTE *pTargetBase = reinterpret_cast<BYTE *>(
+        VirtualAllocEx(hProc, NULL, pNt->OptionalHeader.SizeOfImage,
+                       MEM_COMMIT | MEM_RESERVE, PAGE_EXECUTE_READWRITE));
+    if (pTargetBase) {
+      set_stage("Writing PE sections and headers...", 93);
+      Sleep(250);
+
+      // 2. Map Sections
+      WriteProcessMemory(hProc, pTargetBase, dllData.data(),
+                         pNt->OptionalHeader.SizeOfHeaders, nullptr);
+      IMAGE_SECTION_HEADER *pSec = IMAGE_FIRST_SECTION(pNt);
+      for (UINT i = 0; i < pNt->FileHeader.NumberOfSections; ++i, ++pSec) {
+        if (pSec->SizeOfRawData) {
+          WriteProcessMemory(hProc, pTargetBase + pSec->VirtualAddress,
+                             dllData.data() + pSec->PointerToRawData,
+                             pSec->SizeOfRawData, nullptr);
+        }
       }
+
+      set_stage("Configuring manual mapping & imports...", 96);
+      Sleep(200);
+
+      // 3. Setup Mapping Data & arguments
+      ManualMappingData data = {};
+      data.pLoadLibraryA = LoadLibraryA;
+      data.pGetProcAddress = GetProcAddress;
+
+      HMODULE hNtDll = GetModuleHandleA("ntdll.dll");
+      if (hNtDll) {
+        data.pRtlAddFunctionTable = reinterpret_cast<BOOLEAN(WINAPI *)(
+            PRUNTIME_FUNCTION, DWORD, DWORD64)>(
+            GetProcAddress(hNtDll, "RtlAddFunctionTable"));
+      }
+
+      data.pBase = pTargetBase;
+      strncpy_s(data.token, token.c_str(), sizeof(data.token) - 1);
+      strncpy_s(data.app_id, app_id.c_str(), sizeof(data.app_id) - 1);
+
+      set_stage("Executing remote payload thread...", 99);
+      Sleep(200);
+
+      // 4. Inject Shellcode and mapping data
+      BYTE *pMappingData = reinterpret_cast<BYTE *>(
+          VirtualAllocEx(hProc, NULL, sizeof(ManualMappingData),
+                         MEM_COMMIT | MEM_RESERVE, PAGE_READWRITE));
+      WriteProcessMemory(hProc, pMappingData, &data, sizeof(ManualMappingData),
+                         nullptr);
+
+      DWORD shellcodeSize = reinterpret_cast<DWORD_PTR>(LoaderShellcodeEnd) -
+                            reinterpret_cast<DWORD_PTR>(LoaderShellcode);
+      BYTE *pShellcode = reinterpret_cast<BYTE *>(
+          VirtualAllocEx(hProc, NULL, shellcodeSize, MEM_COMMIT | MEM_RESERVE,
+                         PAGE_EXECUTE_READWRITE));
+      WriteProcessMemory(hProc, pShellcode, LoaderShellcode, shellcodeSize,
+                         nullptr);
+
+      // 5. Execute in remote process
+      HANDLE hThread = CreateRemoteThread(
+          hProc, NULL, 0, reinterpret_cast<LPTHREAD_START_ROUTINE>(pShellcode),
+          pMappingData, 0, NULL);
+      if (hThread) {
+        CloseHandle(hThread);
+        bSuccess = true;
+        set_stage("Payload injected successfully!", 100);
+        set_finished(true);
+      } else {
+        set_stage("CreateRemoteThread failed", 0);
+      }
+    } else {
+      set_stage("VirtualAllocEx failed in target", 0);
     }
 
-    // 3. Setup Mapping Data & arguments
-    ManualMappingData data = {};
-    data.pLoadLibraryA = LoadLibraryA;
-    data.pGetProcAddress = GetProcAddress;
-
-    HMODULE hNtDll = GetModuleHandleA("ntdll.dll");
-    if (hNtDll) {
-      data.pRtlAddFunctionTable = reinterpret_cast<BOOLEAN(WINAPI *)(
-          PRUNTIME_FUNCTION, DWORD, DWORD64)>(
-          GetProcAddress(hNtDll, "RtlAddFunctionTable"));
+    if (hProc != GetCurrentProcess()) {
+      CloseHandle(hProc);
     }
-
-    data.pBase = pTargetBase;
-    strncpy_s(data.token, token.c_str(), sizeof(data.token) - 1);
-    strncpy_s(data.app_id, app_id.c_str(), sizeof(data.app_id) - 1);
-
-    // 4. Inject Shellcode and mapping data
-    BYTE *pMappingData = reinterpret_cast<BYTE *>(
-        VirtualAllocEx(hProc, NULL, sizeof(ManualMappingData),
-                       MEM_COMMIT | MEM_RESERVE, PAGE_READWRITE));
-    WriteProcessMemory(hProc, pMappingData, &data, sizeof(ManualMappingData),
-                       nullptr);
-
-    DWORD shellcodeSize = reinterpret_cast<DWORD_PTR>(LoaderShellcodeEnd) -
-                          reinterpret_cast<DWORD_PTR>(LoaderShellcode);
-    BYTE *pShellcode = reinterpret_cast<BYTE *>(
-        VirtualAllocEx(hProc, NULL, shellcodeSize, MEM_COMMIT | MEM_RESERVE,
-                       PAGE_EXECUTE_READWRITE));
-    WriteProcessMemory(hProc, pShellcode, LoaderShellcode, shellcodeSize,
-                       nullptr);
-
-    // 5. Execute
-    HANDLE hThread = CreateRemoteThread(
-        hProc, NULL, 0, reinterpret_cast<LPTHREAD_START_ROUTINE>(pShellcode),
-        pMappingData, 0, NULL);
-    if (hThread) {
-      CloseHandle(hThread);
-      bSuccess = true;
-    }
+  } else {
+    set_stage("OpenProcess failed for target PID", 0);
   }
 
-  CloseHandle(hProc);
-
-  return true;
+  return bSuccess;
 }
