@@ -329,23 +329,24 @@ class WeaveIPCBridge {
   public async launchApp(
     app: AppItem,
     token: string,
-    onProgress: (stage: string, progress: number) => void
+    onProgress: (stage: string, progress: number, isFinal?: boolean) => void
   ): Promise<{ success: boolean; message: string }> {
     try {
       const saucer = await import('@saucer-dev/types');
       const authToken = token || (typeof window !== 'undefined' ? localStorage.getItem('launcher_token') || '' : '');
 
-      // Read real stage name (std::string) and progress (int) exposed by C++
+      // Read real stage name, progress and is_finished exposed by C++
       let active = true;
       const pollProgress = async () => {
         while (active) {
           try {
-            const [stageName, stageProgress] = await Promise.all([
+            const [stageName, stageProgress, isFinished] = await Promise.all([
               saucer.call<string>('get_stage_name', []),
-              saucer.call<number>('get_stage_progress', [])
+              saucer.call<number>('get_stage_progress', []),
+              saucer.call<boolean>('is_finished', []).catch(() => false)
             ]);
             if (stageName) {
-              onProgress(stageName, typeof stageProgress === 'number' ? stageProgress : 0);
+              onProgress(stageName, typeof stageProgress === 'number' ? stageProgress : 0, Boolean(isFinished));
             }
           } catch (e) {}
           await new Promise((r) => setTimeout(r, 40));
@@ -364,7 +365,7 @@ class WeaveIPCBridge {
           saucer.call<number>('get_stage_progress', [])
         ]);
         if (finalStage) {
-          onProgress(finalStage, typeof finalProgress === 'number' ? finalProgress : 100);
+          onProgress(finalStage, typeof finalProgress === 'number' ? finalProgress : 100, injectSuccess);
         }
       } catch (e) {}
 

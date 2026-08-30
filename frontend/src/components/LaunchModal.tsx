@@ -28,11 +28,11 @@ export const LaunchModal: React.FC<LaunchModalProps> = ({ app, token, onClose, o
       setStage('Initializing Loader pipeline...');
       setProgress(5);
 
-      const res = await ipc.launchApp(app, token || '', (currentStage, currentProgress) => {
+      const res = await ipc.launchApp(app, token || '', (currentStage, currentProgress, isFinal) => {
         if (!mounted) return;
         setStage(currentStage);
         setProgress(currentProgress);
-        if (currentProgress >= 100) {
+        if (isFinal) {
           setStatus('success');
         }
       });
@@ -115,7 +115,7 @@ export const LaunchModal: React.FC<LaunchModalProps> = ({ app, token, onClose, o
                   className={`absolute top-0 bottom-0 left-0 rounded-full transition-colors duration-500 ${
                     status === 'error'
                       ? 'bg-rose-500 shadow-[0_0_8px_#f43f5e]'
-                      : status === 'success' || progress >= 100
+                      : status === 'success'
                       ? 'bg-emerald-500 shadow-[0_0_12px_#10b981]'
                       : 'bg-[#ff8c00] shadow-[0_0_8px_#ff8c00]'
                   }`}
@@ -124,7 +124,7 @@ export const LaunchModal: React.FC<LaunchModalProps> = ({ app, token, onClose, o
               
               <div className="flex items-center justify-center gap-2 text-xs font-medium text-[#888]">
                 {status === 'loading' && <Loader2 className="w-3.5 h-3.5 text-[#ff8c00] animate-spin" />}
-                {(status === 'success' || progress >= 100) && (
+                {status === 'success' && (
                   <motion.div initial={{ scale: 0 }} animate={{ scale: 1 }}>
                     <CheckCircle2 className="w-4 h-4 text-emerald-400" />
                   </motion.div>
@@ -142,7 +142,7 @@ export const LaunchModal: React.FC<LaunchModalProps> = ({ app, token, onClose, o
                   className={
                     status === 'error' 
                       ? 'text-rose-400 font-mono text-[11px]' 
-                      : (status === 'success' || progress >= 100) 
+                      : status === 'success'
                       ? 'text-emerald-400 font-semibold' 
                       : 'text-[#aaa]'
                   }

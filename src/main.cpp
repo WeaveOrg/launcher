@@ -55,6 +55,10 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR lpCmdLine, int nCmdShow
         return loader::get_stage_progress();
     });
 
+    webview.expose("is_finished", []() -> bool {
+        return loader::is_finished();
+    });
+
     // Backend payload fetch and inject logic
     webview.expose("fetch_and_inject", [](const std::string& app_id, const std::string& token) -> bool {
         return loader::fetch_and_inject(app_id, token);

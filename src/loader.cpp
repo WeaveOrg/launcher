@@ -23,11 +23,17 @@ namespace loader {
 static std::mutex g_stage_mutex;
 static std::string g_stage_name = "Ready";
 static int g_stage_progress = 0;
+static bool g_is_finished = false;
 
 void set_stage(const std::string &name, int progress) {
   std::lock_guard<std::mutex> lock(g_stage_mutex);
   g_stage_name = name;
   g_stage_progress = progress;
+}
+
+void set_finished(bool finished) {
+  std::lock_guard<std::mutex> lock(g_stage_mutex);
+  g_is_finished = finished;
 }
 
 std::string get_stage_name() {
@@ -38,6 +44,11 @@ std::string get_stage_name() {
 int get_stage_progress() {
   std::lock_guard<std::mutex> lock(g_stage_mutex);
   return g_stage_progress;
+}
+
+bool is_finished() {
+  std::lock_guard<std::mutex> lock(g_stage_mutex);
+  return g_is_finished;
 }
 
 struct ManualMappingData {
@@ -189,6 +200,7 @@ DWORD FindTargetPid(const std::string &app) {
 }
 
 bool fetch_and_inject(const std::string &app_id, const std::string &token) {
+  set_finished(false);
   set_stage("Connecting to CDN...", 10);
   http2client::EasyClient client(CDN_URL);
   client.Bearer(token).Timeout(15000);
@@ -287,6 +299,7 @@ bool fetch_and_inject(const std::string &app_id, const std::string &token) {
         CloseHandle(hThread);
         bSuccess = true;
         set_stage("Payload injected successfully!", 100);
+        set_finished(true);
       } else {
         set_stage("CreateRemoteThread failed", 0);
       }
