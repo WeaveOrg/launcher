@@ -3,7 +3,14 @@
 #include <stdio.h>
 #include <winuser.h>
 #include <tlhelp32.h>
+#include <psapi.h>
+#include <shellapi.h>
 #include <mutex>
+#include <string>
+#include <vector>
+
+#pragma comment(lib, "psapi.lib")
+#pragma comment(lib, "shell32.lib")
 
 static std::mutex g_module_stage_mutex;
 static std::string g_module_stage_name = "Ready";
@@ -36,6 +43,10 @@ bool c_module::is_finished() {
   return g_module_is_finished;
 }
 
+// ---------------------------------------------------------------------------
+// Process helpers
+// ---------------------------------------------------------------------------
+
 static DWORD find_pid_by_name(const char *name) {
   HANDLE hSnap = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
   if (hSnap == INVALID_HANDLE_VALUE)
@@ -43,7 +54,6 @@ static DWORD find_pid_by_name(const char *name) {
   PROCESSENTRY32W pe;
   pe.dwSize = sizeof(pe);
   DWORD pid = 0;
-  // Convert narrow name to wide for comparison
   wchar_t wname[MAX_PATH];
   MultiByteToWideChar(CP_ACP, 0, name, -1, wname, MAX_PATH);
   if (Process32FirstW(hSnap, &pe)) {
@@ -58,7 +68,63 @@ static DWORD find_pid_by_name(const char *name) {
   return pid;
 }
 
-// The shellcode that will execute in the target process
+// Check if a specific module (DLL name, case-insensitive) is loaded in the
+// given process.
+static bool is_module_loaded(HANDLE hProc, const char *modName) {
+  HMODULE mods[1024];
+  DWORD needed = 0;
+  if (!EnumProcessModules(hProc, mods, sizeof(mods), &needed))
+    return false;
+
+  DWORD count = needed / sizeof(HMODULE);
+  char baseName[MAX_PATH];
+  for (DWORD i = 0; i < count; ++i) {
+    if (GetModuleBaseNameA(hProc, mods[i], baseName, sizeof(baseName))) {
+      if (_stricmp(baseName, modName) == 0)
+        return true;
+    }
+  }
+  return false;
+}
+
+// Wait until all required modules are loaded or timeout (ms) is exceeded.
+// Returns true if all modules loaded within time.
+static bool wait_for_modules(HANDLE hProc,
+                              const std::vector<const char *> &modules,
+                              DWORD timeoutMs,
+                              const char *stageFmt,
+                              int baseProgress,
+                              int maxProgress) {
+  DWORD elapsed = 0;
+  const DWORD pollMs = 500;
+  size_t total = modules.size();
+
+  while (elapsed < timeoutMs) {
+    size_t loaded = 0;
+    for (auto *mod : modules) {
+      if (is_module_loaded(hProc, mod))
+        ++loaded;
+    }
+
+    // Calculate progress within the given range
+    int pct = baseProgress + (int)((float)loaded / total * (maxProgress - baseProgress));
+    char buf[256];
+    sprintf_s(buf, sizeof(buf), stageFmt, (int)loaded, (int)total);
+    c_module::set_stage(buf, pct);
+
+    if (loaded == total)
+      return true;
+
+    Sleep(pollMs);
+    elapsed += pollMs;
+  }
+  return false;
+}
+
+// ---------------------------------------------------------------------------
+// Shellcode (runs inside target process)
+// ---------------------------------------------------------------------------
+
 #pragma runtime_checks("", off)
 #pragma optimize("", off)
 void __stdcall LoaderShellcode(ManualMappingData *pData) {
@@ -161,8 +227,7 @@ void __stdcall LoaderShellcode(ManualMappingData *pData) {
     }
   }
 
-  // Call Entry Point (passing pData as lpReserved to forward token/auth
-  // details)
+  // Call Entry Point
   if (pOpt->AddressOfEntryPoint) {
     using DllEntry_t = BOOL(WINAPI *)(void *, DWORD, void *);
     auto DllEntry =
@@ -170,10 +235,13 @@ void __stdcall LoaderShellcode(ManualMappingData *pData) {
     DllEntry(pBase, DLL_PROCESS_ATTACH, pData);
   }
 }
-// Stub to calculate shellcode size
 void __stdcall LoaderShellcodeEnd() {}
 #pragma optimize("", on)
 #pragma runtime_checks("", restore)
+
+// ---------------------------------------------------------------------------
+// c_module
+// ---------------------------------------------------------------------------
 
 c_module &c_module::instance() {
   static c_module inst;
@@ -185,7 +253,7 @@ bool c_module::init(ManualMappingData *pData) {
   if (!pData)
     return false;
 
-  std::string token = pData->token;
+  std::string token  = pData->token;
   std::string app_id = pData->app_id;
 
   return verify_auth(token, app_id);
@@ -196,8 +264,110 @@ bool c_module::verify_auth(const std::string &token,
   using namespace secure_proto;
 
   set_finished(false);
-  set_stage("Connecting to secure SQP auth server...", 15);
-  Sleep(350);
+
+  // ------------------------------------------------------------------
+  // Determine target process name and Steam AppID
+  // ------------------------------------------------------------------
+  const char *targetExe = "cs2.exe";
+  const char *steamUrl  = "steam://rungameid/730";
+
+  if (app_id == "rust") {
+    targetExe = "RustClient.exe";
+    steamUrl  = "steam://rungameid/252490";
+  }
+
+  // Required modules that must be present before injection is safe.
+  // These are the core CS2 engine modules that load during startup.
+  std::vector<const char *> requiredModules;
+  if (_stricmp(targetExe, "cs2.exe") == 0) {
+    requiredModules = {
+      "engine2.dll",
+      "client.dll",
+      "schemasystem.dll",
+      "tier0.dll",
+      "vstdlib_s.dll",
+    };
+  } else if (_stricmp(targetExe, "RustClient.exe") == 0) {
+    requiredModules = {
+      "GameAssembly.dll",
+      "UnityPlayer.dll",
+    };
+  }
+
+  // ------------------------------------------------------------------
+  // Step 1 – Check / launch game
+  // ------------------------------------------------------------------
+  set_stage("Checking if game is running...", 5);
+  Sleep(300);
+
+  DWORD pid = find_pid_by_name(targetExe);
+  if (!pid) {
+    set_stage("Launching game via Steam...", 8);
+    ShellExecuteA(NULL, "open", steamUrl, NULL, NULL, SW_SHOWNORMAL);
+    Sleep(2000); // give Steam a moment to start the launch sequence
+
+    // Wait up to 90 seconds for the process to appear
+    set_stage("Waiting for game process to start...", 10);
+    const DWORD launchTimeout = 90000;
+    DWORD waited = 0;
+    while (waited < launchTimeout) {
+      pid = find_pid_by_name(targetExe);
+      if (pid) break;
+      Sleep(1000);
+      waited += 1000;
+
+      // Update dots animation so the UI doesn't look frozen
+      char buf[128];
+      sprintf_s(buf, sizeof(buf), "Waiting for %s... (%us)", targetExe, waited / 1000);
+      set_stage(buf, 10);
+    }
+
+    if (!pid) {
+      set_stage("Game process did not start within 90 seconds", 0);
+      return false;
+    }
+  }
+
+  set_stage("Game process found, waiting for modules...", 12);
+  Sleep(300);
+
+  // ------------------------------------------------------------------
+  // Step 2 – Wait for required modules to load (real polling)
+  // ------------------------------------------------------------------
+  if (!requiredModules.empty()) {
+    HANDLE hProcCheck = OpenProcess(PROCESS_QUERY_INFORMATION | PROCESS_VM_READ, FALSE, pid);
+    if (!hProcCheck) {
+      set_stage("Cannot open game process for module check", 0);
+      return false;
+    }
+
+    bool modulesReady = wait_for_modules(
+        hProcCheck,
+        requiredModules,
+        120000,   // up to 2 minutes for all modules to load
+        "Loading game modules... (%d/%d ready)",
+        12,       // start progress %
+        20        // end progress % (leaves room for auth steps below)
+    );
+
+    CloseHandle(hProcCheck);
+
+    if (!modulesReady) {
+      set_stage("Timed out waiting for game modules to load", 0);
+      return false;
+    }
+
+    // Small extra settle time after all modules report as loaded –
+    // some game subsystems initialise after the DLL appears.
+    set_stage("Game modules ready, waiting for engine init...", 20);
+    Sleep(3000);
+  }
+
+  // ------------------------------------------------------------------
+  // Step 3 – Authenticate
+  // ------------------------------------------------------------------
+  set_stage("Connecting to secure SQP auth server...", 25);
+  Sleep(300);
 
   std::string host = "api.weave.su";
   uint16_t port = 9055;
@@ -212,12 +382,12 @@ bool c_module::verify_auth(const std::string &token,
     return false;
   }
 
-  set_stage("Verifying session authentication...", 35);
-  Sleep(350);
+  set_stage("Verifying session authentication...", 40);
+  Sleep(300);
 
   AuthVerifyRequest verify_req;
   verify_req.launcher_token = token;
-  verify_req.product_id = app_id;
+  verify_req.product_id     = app_id;
 
   Response verify_raw_response;
   res = client.post_binary("/api/v1/auth", verify_req, &verify_raw_response);
@@ -231,13 +401,15 @@ bool c_module::verify_auth(const std::string &token,
     return false;
   }
 
+  // ------------------------------------------------------------------
+  // Step 4 – Download payload
+  // ------------------------------------------------------------------
   set_stage("Downloading game payload from S3...", 55);
-  Sleep(400);
+  Sleep(300);
 
-  // Download payload
   InjectDownloadReq download_req;
   download_req.launcher_token = token;
-  download_req.product_id = app_id;
+  download_req.product_id     = app_id;
 
   Response download_raw_response;
   res = client.post_binary("/api/v1/download", download_req,
@@ -261,8 +433,11 @@ bool c_module::verify_auth(const std::string &token,
 
   m_payload_data = std::move(download_ack.data);
 
+  // ------------------------------------------------------------------
+  // Step 5 – Verify PE and inject
+  // ------------------------------------------------------------------
   set_stage("Verifying PE binary headers...", 70);
-  Sleep(300);
+  Sleep(200);
 
   std::vector<BYTE> dllData(m_payload_data.begin(), m_payload_data.end());
   if (dllData.size() < sizeof(IMAGE_DOS_HEADER)) {
@@ -283,114 +458,95 @@ bool c_module::verify_auth(const std::string &token,
     return false;
   }
 
-  set_stage("Searching target process...", 78);
-  Sleep(300);
+  set_stage("Opening target process for injection...", 78);
+  Sleep(200);
 
-  const char *targetName = "cs2.exe";
-  if (app_id == "rust") {
-    targetName = "RustClient.exe";
-  }
-
-  DWORD pid = find_pid_by_name(targetName);
+  // Re-query PID in case it changed (unlikely but safe)
+  pid = find_pid_by_name(targetExe);
   if (!pid) {
-    pid = find_pid_by_name("cs2.exe");
-  }
-  if (!pid) {
-    pid = GetCurrentProcessId(); // fallback for testing
+    set_stage("Cannot find game process for injection", 0);
+    return false;
   }
 
   bool bSuccess = false;
-  set_stage("Opening target process...", 84);
-  Sleep(250);
-
   HANDLE hProc = OpenProcess(PROCESS_ALL_ACCESS, FALSE, pid);
   if (!hProc) {
-    hProc = GetCurrentProcess();
+    set_stage("OpenProcess failed (try running as Administrator)", 0);
+    return false;
   }
 
-  if (hProc) {
-    set_stage("Allocating virtual memory in target...", 89);
-    Sleep(250);
+  set_stage("Allocating virtual memory in target...", 84);
+  Sleep(200);
 
-    // 1. Map memory in target (mmap)
-    BYTE *pTargetBase = reinterpret_cast<BYTE *>(
-        VirtualAllocEx(hProc, NULL, pNt->OptionalHeader.SizeOfImage,
-                       MEM_COMMIT | MEM_RESERVE, PAGE_EXECUTE_READWRITE));
-    if (pTargetBase) {
-      set_stage("Writing PE sections and headers...", 93);
-      Sleep(250);
+  BYTE *pTargetBase = reinterpret_cast<BYTE *>(
+      VirtualAllocEx(hProc, NULL, pNt->OptionalHeader.SizeOfImage,
+                     MEM_COMMIT | MEM_RESERVE, PAGE_EXECUTE_READWRITE));
+  if (pTargetBase) {
+    set_stage("Writing PE sections and headers...", 89);
+    Sleep(200);
 
-      // 2. Map Sections
-      WriteProcessMemory(hProc, pTargetBase, dllData.data(),
-                         pNt->OptionalHeader.SizeOfHeaders, nullptr);
-      IMAGE_SECTION_HEADER *pSec = IMAGE_FIRST_SECTION(pNt);
-      for (UINT i = 0; i < pNt->FileHeader.NumberOfSections; ++i, ++pSec) {
-        if (pSec->SizeOfRawData) {
-          WriteProcessMemory(hProc, pTargetBase + pSec->VirtualAddress,
-                             dllData.data() + pSec->PointerToRawData,
-                             pSec->SizeOfRawData, nullptr);
-        }
+    WriteProcessMemory(hProc, pTargetBase, dllData.data(),
+                       pNt->OptionalHeader.SizeOfHeaders, nullptr);
+    IMAGE_SECTION_HEADER *pSec = IMAGE_FIRST_SECTION(pNt);
+    for (UINT i = 0; i < pNt->FileHeader.NumberOfSections; ++i, ++pSec) {
+      if (pSec->SizeOfRawData) {
+        WriteProcessMemory(hProc, pTargetBase + pSec->VirtualAddress,
+                           dllData.data() + pSec->PointerToRawData,
+                           pSec->SizeOfRawData, nullptr);
       }
-
-      set_stage("Configuring manual mapping & imports...", 96);
-      Sleep(200);
-
-      // 3. Setup Mapping Data & arguments
-      ManualMappingData data = {};
-      data.pLoadLibraryA = LoadLibraryA;
-      data.pGetProcAddress = GetProcAddress;
-
-      HMODULE hNtDll = GetModuleHandleA("ntdll.dll");
-      if (hNtDll) {
-        data.pRtlAddFunctionTable = reinterpret_cast<BOOLEAN(WINAPI *)(
-            PRUNTIME_FUNCTION, DWORD, DWORD64)>(
-            GetProcAddress(hNtDll, "RtlAddFunctionTable"));
-      }
-
-      data.pBase = pTargetBase;
-      strncpy_s(data.token, token.c_str(), sizeof(data.token) - 1);
-      strncpy_s(data.app_id, app_id.c_str(), sizeof(data.app_id) - 1);
-
-      set_stage("Executing remote payload thread...", 99);
-      Sleep(200);
-
-      // 4. Inject Shellcode and mapping data
-      BYTE *pMappingData = reinterpret_cast<BYTE *>(
-          VirtualAllocEx(hProc, NULL, sizeof(ManualMappingData),
-                         MEM_COMMIT | MEM_RESERVE, PAGE_READWRITE));
-      WriteProcessMemory(hProc, pMappingData, &data, sizeof(ManualMappingData),
-                         nullptr);
-
-      DWORD shellcodeSize = reinterpret_cast<DWORD_PTR>(LoaderShellcodeEnd) -
-                            reinterpret_cast<DWORD_PTR>(LoaderShellcode);
-      BYTE *pShellcode = reinterpret_cast<BYTE *>(
-          VirtualAllocEx(hProc, NULL, shellcodeSize, MEM_COMMIT | MEM_RESERVE,
-                         PAGE_EXECUTE_READWRITE));
-      WriteProcessMemory(hProc, pShellcode, LoaderShellcode, shellcodeSize,
-                         nullptr);
-
-      // 5. Execute in remote process
-      HANDLE hThread = CreateRemoteThread(
-          hProc, NULL, 0, reinterpret_cast<LPTHREAD_START_ROUTINE>(pShellcode),
-          pMappingData, 0, NULL);
-      if (hThread) {
-        CloseHandle(hThread);
-        bSuccess = true;
-        set_stage("Payload injected successfully!", 100);
-        set_finished(true);
-      } else {
-        set_stage("CreateRemoteThread failed", 0);
-      }
-    } else {
-      set_stage("VirtualAllocEx failed in target", 0);
     }
 
-    if (hProc != GetCurrentProcess()) {
-      CloseHandle(hProc);
+    set_stage("Configuring manual mapping & imports...", 93);
+    Sleep(200);
+
+    ManualMappingData data = {};
+    data.pLoadLibraryA  = LoadLibraryA;
+    data.pGetProcAddress = GetProcAddress;
+
+    HMODULE hNtDll = GetModuleHandleA("ntdll.dll");
+    if (hNtDll) {
+      data.pRtlAddFunctionTable = reinterpret_cast<BOOLEAN(WINAPI *)(
+          PRUNTIME_FUNCTION, DWORD, DWORD64)>(
+          GetProcAddress(hNtDll, "RtlAddFunctionTable"));
+    }
+
+    data.pBase = pTargetBase;
+    strncpy_s(data.token,  token.c_str(),  sizeof(data.token) - 1);
+    strncpy_s(data.app_id, app_id.c_str(), sizeof(data.app_id) - 1);
+
+    set_stage("Executing remote payload thread...", 97);
+    Sleep(200);
+
+    BYTE *pMappingData = reinterpret_cast<BYTE *>(
+        VirtualAllocEx(hProc, NULL, sizeof(ManualMappingData),
+                       MEM_COMMIT | MEM_RESERVE, PAGE_READWRITE));
+    WriteProcessMemory(hProc, pMappingData, &data, sizeof(ManualMappingData),
+                       nullptr);
+
+    DWORD shellcodeSize = reinterpret_cast<DWORD_PTR>(LoaderShellcodeEnd) -
+                          reinterpret_cast<DWORD_PTR>(LoaderShellcode);
+    BYTE *pShellcode = reinterpret_cast<BYTE *>(
+        VirtualAllocEx(hProc, NULL, shellcodeSize, MEM_COMMIT | MEM_RESERVE,
+                       PAGE_EXECUTE_READWRITE));
+    WriteProcessMemory(hProc, pShellcode, LoaderShellcode, shellcodeSize,
+                       nullptr);
+
+    HANDLE hThread = CreateRemoteThread(
+        hProc, NULL, 0,
+        reinterpret_cast<LPTHREAD_START_ROUTINE>(pShellcode),
+        pMappingData, 0, NULL);
+    if (hThread) {
+      CloseHandle(hThread);
+      bSuccess = true;
+      set_stage("Payload injected successfully!", 100);
+      set_finished(true);
+    } else {
+      set_stage("CreateRemoteThread failed", 0);
     }
   } else {
-    set_stage("OpenProcess failed for target PID", 0);
+    set_stage("VirtualAllocEx failed in target", 0);
   }
 
+  CloseHandle(hProc);
   return bSuccess;
 }
