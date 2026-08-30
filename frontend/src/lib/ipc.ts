@@ -49,6 +49,21 @@ export interface NewsItem {
   content: string;
 }
 
+export interface LauncherProfile {
+  id: string;
+  username: string;
+  avatar: string;
+}
+
+export interface ChangelogItem {
+  id: string;
+  product_id: string;
+  version: string;
+  title: string;
+  content: string;
+  created_at: string;
+}
+
 declare global {
   interface Window {
     saucer?: {
@@ -260,7 +275,45 @@ class WeaveIPCBridge {
     ];
   }
 
+  // Proxy API: Get Launcher User Profile
+  public async getLauncherProfile(token?: string): Promise<LauncherProfile | null> {
+    const launcherToken = token || (typeof window !== 'undefined' ? localStorage.getItem('launcher_token') || '' : '');
+    try {
+      const res = await fetch('/api/launcher/profile', {
+        headers: {
+          'X-Launcher-Token': launcherToken
+        }
+      });
+      if (res.ok) {
+        return await res.json();
+      }
+    } catch (e) {
+      console.warn('Failed to fetch launcher profile via proxy', e);
+    }
+    return null;
+  }
+
+  // Proxy API: Get Changelogs
+  public async getChangelogs(productId?: string, token?: string): Promise<ChangelogItem[]> {
+    const launcherToken = token || (typeof window !== 'undefined' ? localStorage.getItem('launcher_token') || '' : '');
+    try {
+      const query = productId ? `?product_id=${encodeURIComponent(productId)}` : '';
+      const res = await fetch(`/api/launcher/changelogs${query}`, {
+        headers: {
+          'X-Launcher-Token': launcherToken
+        }
+      });
+      if (res.ok) {
+        return await res.json();
+      }
+    } catch (e) {
+      console.warn('Failed to fetch changelogs via proxy', e);
+    }
+    return [];
+  }
+
   // Native Target Launcher / Injector Pipeline
+
   public async launchApp(
     app: AppItem,
     onProgress: (stage: string, progress: number) => void
