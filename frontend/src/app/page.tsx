@@ -22,9 +22,12 @@ function MainLauncherContent() {
     setUser(verifiedUser);
     setToken(authToken);
 
-    // Fetch changelogs for cs2 product
+    // Fetch changelogs from backend API
     try {
-      const logs = await ipc.getChangelogs('cs2', authToken);
+      let logs = await ipc.getChangelogs(undefined, authToken);
+      if (!Array.isArray(logs) || logs.length === 0) {
+        logs = await ipc.getChangelogs('cs2', authToken);
+      }
       if (Array.isArray(logs) && logs.length > 0) {
         setChangelogs(logs);
       } else {

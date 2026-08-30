@@ -151,37 +151,9 @@ export const LauncherRedesign: React.FC<LauncherRedesignProps> = ({
                 </div>
               ))
             ) : (
-              // Fallback static updates when backend changelogs list is empty
-              <>
-                <div className="relative pl-8">
-                  <div className="absolute left-[6px] top-[6px] w-3 h-3 rotate-45 bg-[#ff8c00] shadow-[0_0_10px_rgba(255,140,0,0.6)] z-10" />
-                  <div className="flex items-center gap-3 mb-1">
-                    <span className="font-mono text-sm font-bold text-white">v2.1.4</span>
-                    <span className="text-xs text-[#666]">August 25, 2026</span>
-                  </div>
-                  <div className="bg-[#121212] border border-[#222] rounded-lg p-3.5 shadow-sm">
-                    <ul className="list-disc pl-4 text-xs text-[#aaa] space-y-1.5 marker:text-[#444]">
-                      <li><strong className="text-[#ccc]">Security:</strong> Improved injection stealth and stability for the latest game patch.</li>
-                      <li><strong className="text-[#ccc]">Engine:</strong> Added kernel-level memory mapping to bypass anti-cheat checks.</li>
-                      <li><strong className="text-[#ccc]">Fix:</strong> Resolved crash during alt-tab in exclusive fullscreen.</li>
-                    </ul>
-                  </div>
-                </div>
-
-                <div className="relative pl-8">
-                  <div className="absolute left-[6px] top-[6px] w-3 h-3 rotate-45 bg-[#121212] border-2 border-[#444] z-10" />
-                  <div className="flex items-center gap-3 mb-1">
-                    <span className="font-mono text-sm font-bold text-[#888]">v2.1.3</span>
-                    <span className="text-xs text-[#555]">August 10, 2026</span>
-                  </div>
-                  <div className="bg-[#121212]/50 border border-[#1a1a1a] rounded-lg p-3.5">
-                    <ul className="list-disc pl-4 text-xs text-[#777] space-y-1.5 marker:text-[#333]">
-                      <li>Updated internal offsets for the latest patch.</li>
-                      <li>Fixed cloud profile synchronization issue.</li>
-                    </ul>
-                  </div>
-                </div>
-              </>
+              <div className="py-8 text-center text-xs text-[#666] font-mono border border-white/5 rounded-xl bg-[#121212]/30">
+                No changelogs available from backend API.
+              </div>
             )}
           </div>
         </div>
