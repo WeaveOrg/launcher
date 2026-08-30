@@ -311,7 +311,12 @@ class WeaveIPCBridge {
         }
       });
       if (res.ok) {
-        return await res.json();
+        const data = await res.json();
+        if (Array.isArray(data)) return data;
+        if (Array.isArray(data?.changelogs)) return data.changelogs;
+        if (Array.isArray(data?.data)) return data.data;
+        if (Array.isArray(data?.items)) return data.items;
+        return [];
       }
     } catch (e) {
       console.warn('Failed to fetch changelogs via proxy', e);

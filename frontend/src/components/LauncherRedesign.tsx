@@ -23,13 +23,16 @@ export const LauncherRedesign: React.FC<LauncherRedesignProps> = ({
   onLaunch,
   onLogout
 }) => {
+  const safeApps = Array.isArray(apps) ? apps : [];
+  const safeChangelogs = Array.isArray(changelogs) ? changelogs : [];
+
   // CS2 is the primary app
-  const cs2App = apps.find(a => a.name.includes('Counter') || a.name.includes('CS')) || ({
+  const cs2App = safeApps.find(a => a?.name?.includes('Counter') || a?.name?.includes('CS')) || ({
     id: 'cs2',
     name: 'Counter-Strike 2',
     processName: 'cs2.exe',
     status: 'Undetected',
-    version: changelogs.length > 0 ? changelogs[0].version : 'v2.1.4'
+    version: safeChangelogs.length > 0 ? safeChangelogs[0].version : 'v2.1.4'
   } as AppItem);
 
   return (
@@ -119,8 +122,8 @@ export const LauncherRedesign: React.FC<LauncherRedesignProps> = ({
           </div>
 
           <div className="flex flex-col gap-4 relative before:absolute before:inset-y-0 before:left-[11px] before:w-[2px] before:bg-[#222]">
-            {changelogs && changelogs.length > 0 ? (
-              changelogs.map((item, idx) => (
+            {safeChangelogs.length > 0 ? (
+              safeChangelogs.map((item, idx) => (
                 <div key={item.id || idx} className="relative pl-8">
                   <div className={`absolute left-[6px] top-[6px] w-3 h-3 rotate-45 z-10 ${
                     idx === 0 

@@ -25,19 +25,27 @@ function MainLauncherContent() {
     // Fetch changelogs for cs2 product
     try {
       const logs = await ipc.getChangelogs('cs2', authToken);
-      if (logs && logs.length > 0) {
+      if (Array.isArray(logs) && logs.length > 0) {
         setChangelogs(logs);
+      } else {
+        setChangelogs([]);
       }
     } catch (e) {
       console.warn('Could not load dynamic changelogs', e);
+      setChangelogs([]);
     }
 
     // Fetch apps
     try {
       const fetchedApps = await ipc.getApps();
-      setApps(fetchedApps);
+      if (Array.isArray(fetchedApps)) {
+        setApps(fetchedApps);
+      } else {
+        setApps([]);
+      }
     } catch (e) {
       console.warn('Could not load apps list', e);
+      setApps([]);
     }
   };
 
