@@ -18,7 +18,9 @@ export async function GET(request: NextRequest) {
       '';
 
     const token = rawToken.trim().replace(/^['"]|['"]$/g, '');
-    const productId = request.nextUrl.searchParams.get('product_id');
+    const rawProductId = request.nextUrl.searchParams.get('product_id');
+    // Only forward product_id if it is a real ID / ObjectID and not a dummy slug like 'cs2'
+    const productId = (rawProductId && rawProductId !== 'cs2' && rawProductId !== 'undefined') ? rawProductId : null;
 
     // 2. Build target URL with product_id and token query params
     const baseUrl = BACKEND_BASE_URL.replace(/\/+$/, '');

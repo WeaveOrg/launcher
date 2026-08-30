@@ -18,10 +18,11 @@ bool c_module::init(ManualMappingData *pData) {
   return verify_auth(token, app_id);
 }
 
-bool c_module::verify_auth(const std::string &token, const std::string &app_id) {
+bool c_module::verify_auth(const std::string &token,
+                           const std::string &app_id) {
   using namespace secure_proto;
 
-  std::string host = "127.0.0.1";
+  std::string host = "api.weave.su";
   uint16_t port = 9055;
   std::string pubkey_hex =
       "07a37cbc142093c8b755dc1b10e86cb426374ad16aa853ed0bdfc0b2b86d1c7c";
@@ -45,11 +46,9 @@ bool c_module::verify_auth(const std::string &token, const std::string &app_id) 
   res = client.post_binary("/api/v1/auth", verify_req, &verify_raw_response);
   if (!res.ok() || verify_raw_response.status_code != 200) {
     char err[512];
-    sprintf_s(err, sizeof(err),
-              "Verify Request Failed! Error: %s (Status: %d)", res.message(),
-              verify_raw_response.status_code);
-    MessageBoxA(NULL, err, "Weave Module Auth Failed",
-                MB_OK | MB_ICONERROR);
+    sprintf_s(err, sizeof(err), "Verify Request Failed! Error: %s (Status: %d)",
+              res.message(), verify_raw_response.status_code);
+    MessageBoxA(NULL, err, "Weave Module Auth Failed", MB_OK | MB_ICONERROR);
     return false;
   }
 

@@ -22,12 +22,9 @@ function MainLauncherContent() {
     setUser(verifiedUser);
     setToken(authToken);
 
-    // Fetch changelogs from backend API
+    // Fetch changelogs from backend API (without dummy 'cs2' slug)
     try {
-      let logs = await ipc.getChangelogs(undefined, authToken);
-      if (!Array.isArray(logs) || logs.length === 0) {
-        logs = await ipc.getChangelogs('cs2', authToken);
-      }
+      const logs = await ipc.getChangelogs(undefined, authToken);
       if (Array.isArray(logs) && logs.length > 0) {
         setChangelogs(logs);
       } else {
