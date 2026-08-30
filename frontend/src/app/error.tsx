@@ -1,7 +1,8 @@
 'use client';
 
 import React, { useEffect, useState } from 'react';
-import { AlertTriangle, RefreshCw, Terminal, ChevronDown, ChevronUp, WifiOff } from 'lucide-react';
+import { AlertCircle, RefreshCw, Terminal, ChevronDown, ChevronUp, Minus, X, RotateCcw } from 'lucide-react';
+import { ipc } from '@/lib/ipc';
 import { motion } from 'framer-motion';
 
 export default function Error({
@@ -13,108 +14,147 @@ export default function Error({
 }) {
   const [showDetails, setShowDetails] = useState(false);
   const [tokenStatus, setTokenStatus] = useState<string>('Checking...');
-  const [currentUrl, setCurrentUrl] = useState<string>('');
 
   useEffect(() => {
-    console.error('Next.js Page Error caught by Error Boundary:', error);
+    console.error('Weave Launcher Exception:', error);
     if (typeof window !== 'undefined') {
-      setCurrentUrl(window.location.href);
       const urlParams = new URLSearchParams(window.location.search);
       const token = urlParams.get('token') || localStorage.getItem('launcher_token');
-      setTokenStatus(token ? `Token found (${token.substring(0, 8)}...)` : 'Missing (?token=... was not passed)');
+      setTokenStatus(token ? `${token.substring(0, 10)}...` : 'Not detected');
     }
   }, [error]);
 
   return (
-    <div className="flex flex-col h-screen w-screen bg-[#0a0a0f] text-slate-100 font-sans p-6 items-center justify-center select-none overflow-y-auto">
-      <motion.div 
-        initial={{ opacity: 0, scale: 0.95, y: 15 }}
-        animate={{ opacity: 1, scale: 1, y: 0 }}
-        className="w-full max-w-lg bg-[#12131e] border border-rose-500/30 rounded-2xl p-6 shadow-[0_0_30px_rgba(244,63,94,0.1)] flex flex-col gap-5"
+    <div className="flex flex-col h-screen w-screen bg-[#0d0d0d] text-[#ddd] font-sans selection:bg-[#ff8c00] selection:text-black">
+      {/* UNIFIED MINIMAL HEADER */}
+      <header
+        onMouseDown={(e) => {
+          if ((e.target as HTMLElement).closest('.no-drag')) return;
+          ipc.startDrag();
+        }}
+        className="h-14 flex items-center justify-between px-4 drag-region select-none bg-[#121212] border-b border-[#222]"
       >
-        {/* Header with Icon */}
-        <div className="flex items-center gap-4">
-          <div className="w-12 h-12 rounded-xl bg-rose-500/10 border border-rose-500/30 flex items-center justify-center text-rose-400 shrink-0 shadow-[0_0_15px_rgba(244,63,94,0.2)]">
-            <AlertTriangle className="w-6 h-6" />
+        <div className="flex items-center gap-3 no-drag">
+          <div className="w-8 h-8 rounded-md bg-[#1a1a1a] border border-[#333] flex items-center justify-center overflow-hidden">
+            <div className="w-3.5 h-3.5 rotate-45 bg-[#ff8c00] shadow-[0_0_10px_rgba(255,140,0,0.6)]" />
           </div>
-          <div>
-            <h1 className="text-lg font-bold text-white tracking-wide">
-              Failed to Load Launcher Page
-            </h1>
-            <p className="text-xs text-rose-300/80">
-              An error occurred during page rendering or initialization.
-            </p>
+          <div className="flex flex-col">
+            <span className="font-bold text-white text-sm tracking-wide">Weave Launcher</span>
+            <div className="flex items-center gap-1.5 text-[10px] font-mono text-[#888]">
+              <span className="w-1.5 h-1.5 rounded-full bg-rose-500 shadow-[0_0_5px_#f43f5e]" />
+              <span className="text-rose-400">INITIALIZATION ERROR</span>
+            </div>
           </div>
         </div>
 
-        {/* Diagnostic Card */}
-        <div className="bg-[#0b0c14] border border-white/5 rounded-xl p-3.5 space-y-2 text-xs font-mono">
-          <div className="flex items-center justify-between text-slate-400 border-b border-white/5 pb-2">
-            <span>Diagnostics</span>
-            <span className="text-[10px] px-1.5 py-0.5 rounded bg-rose-950/80 text-rose-400 border border-rose-500/20">ERROR</span>
-          </div>
-
-          <div className="grid grid-cols-3 gap-1 text-[11px]">
-            <span className="text-slate-500">Reason:</span>
-            <span className="col-span-2 text-rose-300 font-bold truncate">{error.message || 'Unknown runtime exception'}</span>
-            
-            <span className="text-slate-500">Token Status:</span>
-            <span className="col-span-2 text-slate-300">{tokenStatus}</span>
-
-            {error.digest && (
-              <>
-                <span className="text-slate-500">Error Digest:</span>
-                <span className="col-span-2 text-slate-400">{error.digest}</span>
-              </>
-            )}
-          </div>
+        {/* Window Controls */}
+        <div className="flex items-center gap-1 no-drag pl-4">
+          <button
+            onClick={() => ipc.minimize()}
+            className="w-7 h-7 flex items-center justify-center text-[#666] hover:text-white hover:bg-[#222] rounded transition"
+            title="Minimize"
+          >
+            <Minus className="w-4 h-4" />
+          </button>
+          <button
+            onClick={() => ipc.close()}
+            className="w-7 h-7 flex items-center justify-center text-[#666] hover:text-white hover:bg-red-500/20 hover:text-red-400 rounded transition"
+            title="Close"
+          >
+            <X className="w-4 h-4" />
+          </button>
         </div>
+      </header>
 
-        {/* Stack Trace Collapsible */}
-        {error.stack && (
-          <div className="border border-white/5 rounded-xl overflow-hidden bg-[#07080d]">
-            <button
-              onClick={() => setShowDetails(!showDetails)}
-              className="w-full flex items-center justify-between p-3 text-xs text-slate-400 hover:text-slate-200 transition"
-            >
-              <span className="flex items-center gap-2 font-mono text-[11px]">
-                <Terminal className="w-3.5 h-3.5 text-indigo-400" />
-                Technical Error Stack
+      {/* MAIN ERROR BODY */}
+      <main className="flex-1 overflow-y-auto custom-scrollbar px-6 py-6 bg-[#0d0d0d] flex items-center justify-center">
+        <motion.div
+          initial={{ opacity: 0, y: 8, scale: 0.98 }}
+          animate={{ opacity: 1, y: 0, scale: 1 }}
+          className="max-w-md w-full flex flex-col gap-4"
+        >
+          {/* Status Header */}
+          <div className="flex items-center gap-3">
+            <div className="w-10 h-10 rounded-lg bg-[#161616] border border-[#262626] flex items-center justify-center text-[#ff8c00] shrink-0">
+              <AlertCircle className="w-5 h-5" />
+            </div>
+            <div>
+              <h2 className="text-base font-bold text-white tracking-wide">Interface Error</h2>
+              <p className="text-xs text-[#777]">The launcher encountered an unexpected issue while loading.</p>
+            </div>
+          </div>
+
+          {/* Diagnostic Box */}
+          <div className="bg-[#121212] border border-[#222] rounded-lg p-3.5 shadow-sm space-y-2 text-xs font-mono">
+            <div className="flex items-center justify-between border-b border-[#1f1f1f] pb-2">
+              <span className="text-[#666] uppercase text-[10px] tracking-wider">Exception Details</span>
+              <span className="text-[10px] text-rose-400 bg-rose-950/40 border border-rose-500/20 px-1.5 py-0.5 rounded">
+                CRITICAL
               </span>
-              {showDetails ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
+            </div>
+
+            <div className="space-y-1.5 pt-1 text-[11px]">
+              <div className="flex flex-col gap-0.5">
+                <span className="text-[#555] text-[10px]">REASON</span>
+                <span className="text-rose-300 font-semibold break-words leading-snug">
+                  {error.message || 'An unhandled exception occurred.'}
+                </span>
+              </div>
+
+              <div className="flex justify-between items-center pt-1 border-t border-[#1a1a1a]">
+                <span className="text-[#555] text-[10px]">SESSION TOKEN</span>
+                <span className="text-[#aaa]">{tokenStatus}</span>
+              </div>
+            </div>
+          </div>
+
+          {/* Collapsible Tech Stack */}
+          {error.stack && (
+            <div className="border border-[#222] rounded-lg overflow-hidden bg-[#121212]/50">
+              <button
+                onClick={() => setShowDetails(!showDetails)}
+                className="w-full flex items-center justify-between p-2.5 text-xs text-[#666] hover:text-[#aaa] transition"
+              >
+                <span className="flex items-center gap-1.5 font-mono text-[10px] tracking-wide">
+                  <Terminal className="w-3.5 h-3.5 text-[#ff8c00]" />
+                  TECHNICAL STACK TRACE
+                </span>
+                {showDetails ? <ChevronUp className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5" />}
+              </button>
+
+              {showDetails && (
+                <div className="p-3 pt-0 max-h-36 overflow-y-auto font-mono text-[10px] text-[#777] whitespace-pre-wrap select-text border-t border-[#1a1a1a]">
+                  {error.stack}
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* Action Buttons */}
+          <div className="flex items-center gap-2 pt-2">
+            <button
+              onClick={() => reset()}
+              className="flex-1 flex items-center justify-center gap-2 bg-[#ff8c00] hover:bg-[#ffa02b] text-black font-extrabold text-xs tracking-wider uppercase py-2.5 px-5 rounded-full shadow-[0_0_15px_rgba(255,140,0,0.15)] transition-all active:scale-95"
+            >
+              <RefreshCw className="w-3.5 h-3.5 fill-black" />
+              Try Again
             </button>
 
-            {showDetails && (
-              <div className="p-3 pt-0 max-h-40 overflow-y-auto font-mono text-[10px] text-slate-500 whitespace-pre-wrap select-text border-t border-white/5">
-                {error.stack}
-              </div>
-            )}
+            <button
+              onClick={() => {
+                if (typeof window !== 'undefined') {
+                  localStorage.removeItem('launcher_token');
+                  window.location.reload();
+                }
+              }}
+              className="flex items-center justify-center gap-1.5 bg-[#161616] hover:bg-[#202020] border border-[#2a2a2a] text-[#aaa] hover:text-white font-bold text-xs uppercase tracking-wider py-2.5 px-4 rounded-full transition active:scale-95"
+            >
+              <RotateCcw className="w-3.5 h-3.5" />
+              Reset
+            </button>
           </div>
-        )}
-
-        {/* Action Buttons */}
-        <div className="flex items-center gap-3 pt-2">
-          <button
-            onClick={() => reset()}
-            className="flex-1 flex items-center justify-center gap-2 py-2.5 px-4 rounded-xl bg-gradient-to-r from-orange-500 to-amber-600 hover:from-orange-400 hover:to-amber-500 text-black font-bold text-xs uppercase tracking-wider transition-all shadow-[0_0_15px_rgba(249,115,22,0.2)] active:scale-95"
-          >
-            <RefreshCw className="w-3.5 h-3.5" />
-            Try Again
-          </button>
-
-          <button
-            onClick={() => {
-              if (typeof window !== 'undefined') {
-                localStorage.removeItem('launcher_token');
-                window.location.reload();
-              }
-            }}
-            className="py-2.5 px-4 rounded-xl bg-[#1a1b29] hover:bg-[#232438] border border-white/10 text-slate-300 text-xs font-semibold tracking-wider transition-all"
-          >
-            Reset Session & Reload
-          </button>
-        </div>
-      </motion.div>
+        </motion.div>
+      </main>
     </div>
   );
 }
