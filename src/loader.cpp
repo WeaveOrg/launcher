@@ -221,7 +221,7 @@ bool fetch_and_inject(const std::string &app_id, const std::string &token) {
 
   set_stage("Searching target process...", 65);
   std::string targetProc = app_id + ".exe";
-  if (app_id == "cs2")
+  if (app_id == "cs2" || app_id == "6a943ac671805d202d5fc1e0")
     targetProc = "cs2.exe";
   else if (app_id == "rust")
     targetProc = "RustClient.exe";
