@@ -7,11 +7,12 @@ import { AppItem, ipc } from '@/lib/ipc';
 
 interface LaunchModalProps {
   app: AppItem | null;
+  token?: string | null;
   onClose: () => void;
   onLog: (msg: string) => void;
 }
 
-export const LaunchModal: React.FC<LaunchModalProps> = ({ app, onClose, onLog }) => {
+export const LaunchModal: React.FC<LaunchModalProps> = ({ app, token, onClose, onLog }) => {
   const [stage, setStage] = useState('Initializing Loader pipeline...');
   const [progress, setProgress] = useState(0);
   const [status, setStatus] = useState<'loading' | 'success' | 'error'>('loading');
@@ -22,8 +23,11 @@ export const LaunchModal: React.FC<LaunchModalProps> = ({ app, onClose, onLog })
     let mounted = true;
     const runPipeline = async () => {
       onLog(`Started injection for ${app.name}`);
+      setStatus('loading');
+      setStage('Initializing Loader pipeline...');
+      setProgress(5);
 
-      const res = await ipc.launchApp(app, (currentStage, currentProgress) => {
+      const res = await ipc.launchApp(app, token || '', (currentStage, currentProgress) => {
         if (!mounted) return;
         setStage(currentStage);
         setProgress(currentProgress);
@@ -33,6 +37,7 @@ export const LaunchModal: React.FC<LaunchModalProps> = ({ app, onClose, onLog })
       if (res.success) {
         setStatus('success');
         setStage('Successfully injected!');
+        setProgress(100);
         setTimeout(() => {
           if (mounted) onClose();
         }, 2000);
@@ -44,7 +49,7 @@ export const LaunchModal: React.FC<LaunchModalProps> = ({ app, onClose, onLog })
 
     runPipeline();
     return () => { mounted = false; };
-  }, [app]);
+  }, [app, token]);
 
   return (
     <AnimatePresence>

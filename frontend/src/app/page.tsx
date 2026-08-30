@@ -84,6 +84,7 @@ function MainLauncherContent() {
 
       <LaunchModal
         app={activeLaunchApp}
+        token={token}
         onClose={() => setActiveLaunchApp(null)}
         onLog={(msg) => console.log(msg)}
       />

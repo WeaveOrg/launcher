@@ -1,6 +1,8 @@
 cmake_minimum_required(VERSION 3.20)
 project(WeaveLauncher VERSION 2.0.0 LANGUAGES CXX)
 
+set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
+
 set(CMAKE_CXX_STANDARD 23)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
@@ -9,6 +11,7 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 include_directories(
     include
     ${CMAKE_CURRENT_SOURCE_DIR}/webview2_pkg/build/native/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/thirdparty/http2client/release/include
 )
 
 # Source files
@@ -26,6 +29,17 @@ add_executable(weave_launcher WIN32 ${SOURCES})
 if(WIN32)
     target_link_libraries(weave_launcher PRIVATE
         ${CMAKE_CURRENT_SOURCE_DIR}/webview2_pkg/build/native/x64/WebView2Loader.dll.lib
+        $<$<CONFIG:Debug>:${CMAKE_CURRENT_SOURCE_DIR}/thirdparty/http2client/debug/lib/http2client.lib>
+        $<$<CONFIG:Debug>:${CMAKE_CURRENT_SOURCE_DIR}/thirdparty/http2client/debug/lib/nghttp2.lib>
+        $<$<CONFIG:Debug>:${CMAKE_CURRENT_SOURCE_DIR}/thirdparty/http2client/debug/lib/wolfssl.lib>
+        $<$<CONFIG:Debug>:${CMAKE_CURRENT_SOURCE_DIR}/thirdparty/http2client/debug/lib/zlib.lib>
+        $<$<NOT:$<CONFIG:Debug>>:${CMAKE_CURRENT_SOURCE_DIR}/thirdparty/http2client/release/lib/http2client.lib>
+        $<$<NOT:$<CONFIG:Debug>>:${CMAKE_CURRENT_SOURCE_DIR}/thirdparty/http2client/release/lib/nghttp2.lib>
+        $<$<NOT:$<CONFIG:Debug>>:${CMAKE_CURRENT_SOURCE_DIR}/thirdparty/http2client/release/lib/wolfssl.lib>
+        $<$<NOT:$<CONFIG:Debug>>:${CMAKE_CURRENT_SOURCE_DIR}/thirdparty/http2client/release/lib/zlib.lib>
+        ws2_32
+        crypt32
+        iphlpapi
         advapi32
         user32
         gdi32

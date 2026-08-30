@@ -328,44 +328,56 @@ class WeaveIPCBridge {
 
   public async launchApp(
     app: AppItem,
+    token: string,
     onProgress: (stage: string, progress: number) => void
   ): Promise<{ success: boolean; message: string }> {
-    onProgress('Verifying Session & HWID Auth...', 15);
-    await new Promise((r) => setTimeout(r, 600));
-
-    onProgress('Downloading latest manifest & dynamic offsets...', 35);
-    try {
-      await fetch(`${BACKEND_URL}/api/v1/apps/${app.id}/manifest`);
-    } catch (e) {}
-    await new Promise((r) => setTimeout(r, 700));
-
-    onProgress('Allocating virtual memory & decrypting payload...', 60);
-    await new Promise((r) => setTimeout(r, 800));
-
-    onProgress(`Checking process status for [${app.processName}]...`, 80);
-    const isRunning = window.weaveNative?.checkProcessRunning?.(app.processName) ?? true;
-    await new Promise((r) => setTimeout(r, 600));
-
-    onProgress('Downloading and executing core payload from backend...', 95);
-    
     try {
       const saucer = await import('@saucer-dev/types');
-      const token = localStorage.getItem('weave_token') || 'DEBUG-AUTH-TOKEN';
-      const injectSuccess = await saucer.call<boolean>('fetch_and_inject', [app.id, token]);
-      
+      const authToken = token || (typeof window !== 'undefined' ? localStorage.getItem('launcher_token') || '' : '');
+
+      // Read real stage name (std::string) and progress (int) exposed by C++
+      let active = true;
+      const pollProgress = async () => {
+        while (active) {
+          try {
+            const [stageName, stageProgress] = await Promise.all([
+              saucer.call<string>('get_stage_name', []),
+              saucer.call<number>('get_stage_progress', [])
+            ]);
+            if (stageName) {
+              onProgress(stageName, typeof stageProgress === 'number' ? stageProgress : 0);
+            }
+          } catch (e) {}
+          await new Promise((r) => setTimeout(r, 40));
+        }
+      };
+
+      const pollPromise = pollProgress();
+      const injectSuccess = await saucer.call<boolean>('fetch_and_inject', [app.id, authToken]);
+      active = false;
+      await pollPromise;
+
+      // Final stage state read from C++
+      try {
+        const [finalStage, finalProgress] = await Promise.all([
+          saucer.call<string>('get_stage_name', []),
+          saucer.call<number>('get_stage_progress', [])
+        ]);
+        if (finalStage) {
+          onProgress(finalStage, typeof finalProgress === 'number' ? finalProgress : 100);
+        }
+      } catch (e) {}
+
       if (injectSuccess) {
-        onProgress('Injection Successful! Running active session.', 100);
-        return { success: true, message: `[Weave Loader] Backend payload loaded for ${app.name} (${app.processName}). Memory mapped successfully.` };
+        return { success: true, message: `[Weave Loader] Backend payload loaded for ${app.name} (${app.processName}).` };
       } else {
-        return { success: false, message: 'Native launch failed or backend payload inaccessible.' };
+        return { success: false, message: 'Native injection failed or target process inaccessible.' };
       }
     } catch (err: any) {
-      // Fallback if saucer is not available
-      console.warn('Saucer fetch_and_inject not available', err);
-      onProgress('Loaded successfully in simulated native mode!', 100);
+      console.warn('Saucer fetch_and_inject error', err);
       return {
-        success: true,
-        message: `[Weave Loader] Hook established for ${app.name} (${app.processName}). Memory mapped at 0x7FFE0000.`
+        success: false,
+        message: err?.message || 'Failed to communicate with native launcher engine.'
       };
     }
   }

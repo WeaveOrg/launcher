@@ -1,7 +1,7 @@
 'use client';
 
-import React, { useState, useEffect } from 'react';
-import { ShieldAlert, Loader2, X, Minus, KeyRound, ArrowRight, RefreshCw, AlertCircle } from 'lucide-react';
+import React, { useState, useEffect, useCallback } from 'react';
+import { ShieldAlert, Loader2, X, Minus, KeyRound, RefreshCw, AlertCircle } from 'lucide-react';
 import { ipc, LauncherProfile } from '@/lib/ipc';
 import { motion } from 'framer-motion';
 
@@ -14,18 +14,16 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ initialToken, onSuccess 
   const [error, setError] = useState<string>('');
   const [errorDetails, setErrorDetails] = useState<any>(null);
   const [loading, setLoading] = useState<boolean>(true);
-  const [manualToken, setManualToken] = useState<string>('');
-  const [showManualInput, setShowManualInput] = useState<boolean>(false);
+  const [currentToken, setCurrentToken] = useState<string>('');
 
-  const verifyToken = async (targetToken: string) => {
+  const verifyToken = useCallback(async (targetToken: string) => {
     if (!targetToken) {
-      setError('Token missing');
+      setError('Session Not Found');
       setErrorDetails({
-        message: 'No launcher token was provided.',
-        hint: 'Launch the application with ?token=<launcher_token> in the URL, or enter your token below.'
+        message: 'No launcher authorization token detected.',
+        hint: 'Please start the game through the official Weave launcher.'
       });
       setLoading(false);
-      setShowManualInput(true);
       return;
     }
 
@@ -34,7 +32,6 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ initialToken, onSuccess 
       setError('');
       setErrorDetails(null);
 
-      // Call Next.js server proxy GET /api/launcher/profile?token=... with X-Launcher-Token
       const res = await fetch(`/api/launcher/profile?token=${encodeURIComponent(targetToken)}`, {
         method: 'GET',
         headers: {
@@ -58,26 +55,24 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ initialToken, onSuccess 
       setError(errData?.error || 'Authentication Failed');
       setErrorDetails({
         status: res.status,
-        message: errData?.message || errData?.details || 'Invalid or expired launcher token.',
+        message: errData?.message || errData?.details || 'Invalid or expired launcher session.',
         targetUrl: errData?.targetUrl || '/api/launcher/profile',
         hint: res.status === 401 
-          ? 'Backend rejected the token. Make sure the token is active in your database.' 
+          ? 'Backend rejected the token. Make sure your account subscription is active.' 
           : res.status === 502 
-          ? 'Next.js proxy cannot connect to BACKEND_API_URL. Check your Coolify backend status.' 
+          ? 'Cannot connect to backend server. Check server status or internet connection.' 
           : 'Backend returned an error status code.'
       });
-      setShowManualInput(true);
     } catch (err: any) {
-      setError('Backend Unreachable');
+      setError('Connection Error');
       setErrorDetails({
-        message: err?.message || 'Network error connecting to /api/launcher/profile',
-        hint: 'Ensure your server is online and BACKEND_API_URL environment variable is set.'
+        message: err?.message || 'Network error connecting to auth server.',
+        hint: 'Ensure your server is online and backend API is reachable.'
       });
-      setShowManualInput(true);
     } finally {
       setLoading(false);
     }
-  };
+  }, [onSuccess]);
 
   useEffect(() => {
     const urlParams = typeof window !== 'undefined' ? new URLSearchParams(window.location.search) : null;
@@ -85,25 +80,17 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ initialToken, onSuccess 
     const token = initialToken || queryToken || (typeof window !== 'undefined' ? localStorage.getItem('launcher_token') : null);
 
     if (token) {
-      setManualToken(token);
+      setCurrentToken(token);
       verifyToken(token);
     } else {
-      setError('Token required');
+      setError('Session Not Found');
       setErrorDetails({
-        message: 'No ?token parameter found in URL.',
-        hint: 'Please pass ?token=<launcher_token> in the URL or enter it manually below.'
+        message: 'No launcher authorization token detected.',
+        hint: 'Please start the game through the official Weave launcher.'
       });
       setLoading(false);
-      setShowManualInput(true);
     }
-  }, [initialToken]);
-
-  const handleManualSubmit = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (manualToken.trim()) {
-      verifyToken(manualToken.trim());
-    }
-  };
+  }, [initialToken, verifyToken]);
 
   return (
     <div className="flex flex-col h-screen w-screen bg-[#0d0d0d] text-[#ddd] font-sans selection:bg-[#ff8c00] selection:text-black">
@@ -135,7 +122,7 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ initialToken, onSuccess 
         </div>
       </header>
 
-      {/* MAIN AUTH / ERROR CENTER */}
+      {/* MAIN AUTH / STATUS CENTER */}
       <main className="flex-1 flex items-center justify-center p-6 overflow-y-auto">
         <motion.div
           initial={{ opacity: 0, y: 10, scale: 0.95 }}
@@ -190,33 +177,15 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ initialToken, onSuccess 
                 </div>
               )}
 
-              {/* Manual Token Input Box for Testing */}
-              {showManualInput && (
-                <form onSubmit={handleManualSubmit} className="w-full flex flex-col gap-2 mt-1">
-                  <div className="relative">
-                    <input
-                      type="text"
-                      placeholder="Paste launcher token here..."
-                      value={manualToken}
-                      onChange={(e) => setManualToken(e.target.value)}
-                      className="w-full bg-[#161616] border border-[#333] focus:border-[#ff8c00] rounded-xl px-3.5 py-2.5 text-xs text-white placeholder-[#555] font-mono outline-none transition"
-                    />
-                    <button
-                      type="submit"
-                      disabled={!manualToken.trim()}
-                      className="absolute right-1.5 top-1.5 bottom-1.5 px-3 bg-[#ff8c00] hover:bg-[#ffa02b] disabled:opacity-30 disabled:hover:bg-[#ff8c00] text-black font-bold text-xs rounded-lg flex items-center gap-1 transition active:scale-95"
-                    >
-                      <span>Authorize</span>
-                      <ArrowRight className="w-3 h-3" />
-                    </button>
-                  </div>
-                </form>
-              )}
-
-              {/* Buttons */}
+              {/* Action Buttons */}
               <div className="flex gap-2 mt-2 w-full">
                 <button
-                  onClick={() => verifyToken(manualToken)}
+                  onClick={() => {
+                    const urlParams = typeof window !== 'undefined' ? new URLSearchParams(window.location.search) : null;
+                    const qToken = urlParams?.get('token') || urlParams?.get('launcher_token');
+                    const t = currentToken || initialToken || qToken || (typeof window !== 'undefined' ? localStorage.getItem('launcher_token') : null);
+                    if (t) verifyToken(t);
+                  }}
                   className="flex-1 py-2.5 bg-[#1a1a1a] hover:bg-[#252525] border border-[#333] text-white text-xs font-bold uppercase tracking-wider rounded-xl transition flex items-center justify-center gap-1.5 active:scale-95"
                 >
                   <RefreshCw className="w-3 h-3 text-[#ff8c00]" />
