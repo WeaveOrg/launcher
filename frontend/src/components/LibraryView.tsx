@@ -47,7 +47,8 @@ export const LibraryView: React.FC<LibraryViewProps> = ({
     }
   };
 
-  const filteredApps = apps.filter((app) => {
+  const safeApps = Array.isArray(apps) ? apps : [];
+  const filteredApps = safeApps.filter((app) => {
     const matchesSearch = app.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
       app.category.toLowerCase().includes(searchQuery.toLowerCase());
     const matchesCat = selectedCategory === 'ALL' || app.category.includes(selectedCategory);
@@ -141,7 +142,7 @@ export const LibraryView: React.FC<LibraryViewProps> = ({
 
                   {/* Feature Pills */}
                   <div className="flex flex-wrap gap-1.5 mt-3">
-                    {app.features.slice(0, 3).map((feat, idx) => (
+                    {(Array.isArray(app.features) ? app.features.slice(0, 3) : []).map((feat, idx) => (
                       <span
                         key={idx}
                         className="text-[10px] px-2 py-0.5 rounded-md bg-purple-950/40 border border-purple-500/20 text-purple-300 font-mono"
@@ -149,7 +150,7 @@ export const LibraryView: React.FC<LibraryViewProps> = ({
                         {feat}
                       </span>
                     ))}
-                    {app.features.length > 3 && (
+                    {Array.isArray(app.features) && app.features.length > 3 && (
                       <span className="text-[10px] px-1.5 py-0.5 rounded-md bg-white/5 text-slate-400 font-mono">
                         +{app.features.length - 3}
                       </span>

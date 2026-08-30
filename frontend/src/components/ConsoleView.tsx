@@ -9,6 +9,7 @@ interface ConsoleViewProps {
 }
 
 export const ConsoleView: React.FC<ConsoleViewProps> = ({ logs, onClear }) => {
+  const safeLogs = Array.isArray(logs) ? logs : [];
   return (
     <div className="flex-1 flex flex-col overflow-hidden p-6 space-y-4 select-none">
       <div className="flex items-center justify-between">
@@ -34,12 +35,12 @@ export const ConsoleView: React.FC<ConsoleViewProps> = ({ logs, onClear }) => {
       </div>
 
       <div className="flex-1 bg-[#090a10] border border-purple-500/20 rounded-2xl p-4 font-mono text-xs text-slate-300 overflow-y-auto space-y-1.5 shadow-inner">
-        {logs.length === 0 ? (
+        {safeLogs.length === 0 ? (
           <div className="h-full flex items-center justify-center text-slate-600">
             No native log entries recorded yet.
           </div>
         ) : (
-          logs.map((log, i) => (
+          safeLogs.map((log, i) => (
             <div key={i} className="leading-relaxed">
               {log.includes('SUCCESS') ? (
                 <span className="text-emerald-400 font-semibold">{log}</span>

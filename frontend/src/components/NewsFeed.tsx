@@ -9,6 +9,7 @@ interface NewsFeedProps {
 }
 
 export const NewsFeed: React.FC<NewsFeedProps> = ({ news }) => {
+  const safeNews = Array.isArray(news) ? news : [];
   return (
     <div className="flex-1 flex flex-col overflow-y-auto p-6 space-y-6 select-none">
       <div>
@@ -24,7 +25,7 @@ export const NewsFeed: React.FC<NewsFeedProps> = ({ news }) => {
       </div>
 
       <div className="space-y-4">
-        {news.map((item) => (
+        {safeNews.map((item) => (
           <div
             key={item.id}
             className="p-5 rounded-2xl bg-[#11121c] border border-white/5 hover:border-purple-500/30 transition duration-300 space-y-3"
