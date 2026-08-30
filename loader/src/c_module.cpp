@@ -3,11 +3,13 @@
 #include <stdio.h>
 #include <winuser.h>
 #include <tlhelp32.h>
+#include <psapi.h>
 #include <shellapi.h>
 #include <mutex>
 #include <string>
 #include <vector>
 
+#pragma comment(lib, "psapi.lib")
 #pragma comment(lib, "shell32.lib")
 
 // ---------------------------------------------------------------------------
@@ -75,6 +77,41 @@ static DWORD find_cs2_pid() {
 
   CloseHandle(hSnap);
   return pid;
+}
+
+// ---------------------------------------------------------------------------
+// navsystem.dll wait — polls EnumProcessModules until it appears
+// navsystem.dll is the last engine module CS2 loads; its presence means
+// the game is fully initialised and safe to inject into.
+// ---------------------------------------------------------------------------
+
+static bool wait_for_navsystem(HANDLE hProc, DWORD timeoutMs) {
+  const DWORD pollMs = 500;
+  DWORD elapsed = 0;
+
+  while (elapsed < timeoutMs) {
+    HMODULE mods[2048];
+    DWORD needed = 0;
+    if (EnumProcessModules(hProc, mods, sizeof(mods), &needed)) {
+      DWORD count = needed / sizeof(HMODULE);
+      char baseName[MAX_PATH];
+      for (DWORD i = 0; i < count; ++i) {
+        if (GetModuleBaseNameA(hProc, mods[i], baseName, sizeof(baseName))) {
+          if (_stricmp(baseName, "navsystem.dll") == 0)
+            return true;
+        }
+      }
+    }
+
+    char buf[128];
+    sprintf_s(buf, sizeof(buf),
+              "Waiting for navsystem.dll... (%u s)", elapsed / 1000);
+    c_module::set_stage(buf, 13);
+
+    Sleep(pollMs);
+    elapsed += pollMs;
+  }
+  return false;
 }
 
 // ---------------------------------------------------------------------------
@@ -222,10 +259,29 @@ bool c_module::verify_auth(const std::string &token,
     }
   }
 
-  set_stage("CS2 process found, preparing injection...", 15);
+  // ── 2. Wait for navsystem.dll (CS2 fully loaded) ─────────────────────────
+  set_stage("CS2 started, waiting for navsystem.dll...", 12);
+  Sleep(300);
+
+  HANDLE hProcCheck = OpenProcess(
+      PROCESS_QUERY_INFORMATION | PROCESS_VM_READ, FALSE, pid);
+  if (!hProcCheck) {
+    set_stage("Cannot open CS2 process (run as Administrator)", 0);
+    return false;
+  }
+
+  bool navReady = wait_for_navsystem(hProcCheck, 180000); // up to 3 min
+  CloseHandle(hProcCheck);
+
+  if (!navReady) {
+    set_stage("Timed out waiting for CS2 to fully load", 0);
+    return false;
+  }
+
+  set_stage("CS2 fully loaded, proceeding...", 20);
   Sleep(500);
 
-  // ── 2. Authenticate ───────────────────────────────────────────────────────
+  // ── 3. Authenticate ───────────────────────────────────────────────────────
   set_stage("Connecting to SQP auth server...", 28);
   Sleep(300);
 
