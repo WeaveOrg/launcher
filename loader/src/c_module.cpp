@@ -3,13 +3,11 @@
 #include <stdio.h>
 #include <winuser.h>
 #include <tlhelp32.h>
-#include <psapi.h>
 #include <shellapi.h>
 #include <mutex>
 #include <string>
 #include <vector>
 
-#pragma comment(lib, "psapi.lib")
 #pragma comment(lib, "shell32.lib")
 
 // ---------------------------------------------------------------------------
@@ -51,19 +49,7 @@ bool c_module::is_finished() {
 // CS2-specific constants
 // ---------------------------------------------------------------------------
 
-static constexpr const char *CS2_EXE        = "cs2.exe";
-static constexpr const char *CS2_STEAM_URL  = "steam://rungameid/730";
-
-// All of these must be present in the process module list before injection.
-static const std::vector<const char *> CS2_REQUIRED_MODULES = {
-  "engine2.dll",
-  "client.dll",
-  "schemasystem.dll",
-  "tier0.dll",
-  "vstdlib_s.dll",
-  "inputsystem.dll",
-  "navsystem.dll",
-};
+static constexpr const char *CS2_STEAM_URL = "steam://rungameid/730";
 
 // ---------------------------------------------------------------------------
 // Process helpers
@@ -89,81 +75,6 @@ static DWORD find_cs2_pid() {
 
   CloseHandle(hSnap);
   return pid;
-}
-
-// ---------------------------------------------------------------------------
-// Module snapshot & comparison
-// ---------------------------------------------------------------------------
-
-// Enumerate ALL DLL base-names loaded in the process into a lowercase vector.
-// Single EnumProcessModules call per snapshot — avoids per-module overhead.
-static std::vector<std::string> snapshot_modules(HANDLE hProc) {
-  std::vector<std::string> result;
-  HMODULE mods[2048];
-  DWORD needed = 0;
-  if (!EnumProcessModules(hProc, mods, sizeof(mods), &needed))
-    return result;
-
-  DWORD count = needed / sizeof(HMODULE);
-  char baseName[MAX_PATH];
-  result.reserve(count);
-  for (DWORD i = 0; i < count; ++i) {
-    if (GetModuleBaseNameA(hProc, mods[i], baseName, sizeof(baseName))) {
-      std::string name = baseName;
-      for (auto &c : name) c = (char)tolower((unsigned char)c);
-      result.push_back(std::move(name));
-    }
-  }
-  return result;
-}
-
-// Compare snapshot against required list.
-// Returns the count of required entries found in the snapshot.
-// Full match = return value equals required.size().
-static size_t count_matched(const std::vector<std::string>   &snapshot,
-                             const std::vector<const char *> &required) {
-  size_t found = 0;
-  for (const char *req : required) {
-    std::string reqLow = req;
-    for (auto &c : reqLow) c = (char)tolower((unsigned char)c);
-
-    for (const auto &mod : snapshot) {
-      if (mod == reqLow) {
-        ++found;
-        break;
-      }
-    }
-  }
-  return found;
-}
-
-// Poll every 500 ms until ALL required modules appear in the process snapshot.
-// Updates stage label with count progress.  Returns false on timeout.
-static bool wait_for_cs2_modules(HANDLE hProc, DWORD timeoutMs,
-                                  int baseProgress, int maxProgress) {
-  const size_t total     = CS2_REQUIRED_MODULES.size();
-  const DWORD  pollMs    = 500;
-  DWORD        elapsed   = 0;
-
-  while (elapsed < timeoutMs) {
-    auto   snap   = snapshot_modules(hProc);
-    size_t loaded = count_matched(snap, CS2_REQUIRED_MODULES);
-
-    int pct = baseProgress +
-              (int)((float)loaded / (float)total * (maxProgress - baseProgress));
-
-    char buf[256];
-    sprintf_s(buf, sizeof(buf),
-              "Waiting for CS2 modules... (%zu / %zu loaded)", loaded, total);
-    c_module::set_stage(buf, pct);
-
-    if (loaded == total)
-      return true;
-
-    Sleep(pollMs);
-    elapsed += pollMs;
-  }
-  return false;
 }
 
 // ---------------------------------------------------------------------------
@@ -311,31 +222,10 @@ bool c_module::verify_auth(const std::string &token,
     }
   }
 
-  // ── 2. Wait for all required CS2 modules ─────────────────────────────────
-  set_stage("CS2 process found, checking modules...", 12);
-  Sleep(300);
+  set_stage("CS2 process found, preparing injection...", 15);
+  Sleep(500);
 
-  HANDLE hProcCheck = OpenProcess(
-      PROCESS_QUERY_INFORMATION | PROCESS_VM_READ, FALSE, pid);
-  if (!hProcCheck) {
-    set_stage("Cannot open CS2 process for module check", 0);
-    return false;
-  }
-
-  // Poll snapshot vs required list until all match or 2-min timeout
-  bool modulesReady = wait_for_cs2_modules(hProcCheck, 120000, 12, 20);
-  CloseHandle(hProcCheck);
-
-  if (!modulesReady) {
-    set_stage("Timed out waiting for CS2 modules", 0);
-    return false;
-  }
-
-  // Extra settle: some subsystems init after their DLL appears
-  set_stage("All CS2 modules loaded, waiting for engine init...", 20);
-  Sleep(3000);
-
-  // ── 3. Authenticate ───────────────────────────────────────────────────────
+  // ── 2. Authenticate ───────────────────────────────────────────────────────
   set_stage("Connecting to SQP auth server...", 28);
   Sleep(300);
 
