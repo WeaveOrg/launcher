@@ -329,7 +329,13 @@ class WeaveIPCBridge {
   public async launchApp(
     app: AppItem,
     token: string,
-    onProgress: (stage: string, progress: number, isFinal?: boolean) => void
+    onProgress: (
+      downloadStage: string,
+      downloadProgress: number,
+      mmapStage: string,
+      mmapProgress: number,
+      isFinal: boolean
+    ) => void
   ): Promise<{ success: boolean; message: string }> {
     try {
       const saucer = await import('@saucer-dev/types');
@@ -347,15 +353,21 @@ class WeaveIPCBridge {
       let maxWait = 300; // up to 30 seconds
       while (maxWait-- > 0) {
         try {
-          const [stageName, stageProgress, isFinished] = await Promise.all([
-            saucer.call<string>('get_stage_name', []),
-            saucer.call<number>('get_stage_progress', []),
+          const [downloadStage, downloadProgress, mmapStage, mmapProgress, isFinished] = await Promise.all([
+            saucer.call<string>('get_download_stage', []).catch(() => 'Connecting...'),
+            saucer.call<number>('get_download_progress', []).catch(() => 0),
+            saucer.call<string>('get_mmap_stage', []).catch(() => 'Waiting...'),
+            saucer.call<number>('get_mmap_progress', []).catch(() => 0),
             saucer.call<boolean>('is_finished', []).catch(() => false)
           ]);
 
-          if (stageName) {
-            onProgress(stageName, typeof stageProgress === 'number' ? stageProgress : 0, Boolean(isFinished));
-          }
+          onProgress(
+            String(downloadStage || 'Connecting...'),
+            typeof downloadProgress === 'number' ? downloadProgress : 0,
+            String(mmapStage || 'Waiting...'),
+            typeof mmapProgress === 'number' ? mmapProgress : 0,
+            Boolean(isFinished)
+          );
 
           if (isFinished) {
             return {
@@ -364,10 +376,11 @@ class WeaveIPCBridge {
             };
           }
 
-          if (stageName && stageName.toLowerCase().includes('fail')) {
+          const combinedStage = String(downloadStage || '') + String(mmapStage || '');
+          if (combinedStage.toLowerCase().includes('fail')) {
             return {
               success: false,
-              message: stageName
+              message: String(downloadStage || mmapStage || 'Injection failed')
             };
           }
         } catch (e) {}

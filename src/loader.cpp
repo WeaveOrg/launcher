@@ -25,10 +25,34 @@ static std::string g_stage_name = "Ready";
 static int g_stage_progress = 0;
 static bool g_is_finished = false;
 
+// Phase 1: loader.dll download from CDN (0-100%)
+static std::string g_download_stage = "Waiting...";
+static int g_download_progress = 0;
+
+// Phase 2: Manual mapping into target process (0-100%)
+static std::string g_mmap_stage = "Waiting...";
+static int g_mmap_progress = 0;
+
 void set_stage(const std::string &name, int progress) {
   std::lock_guard<std::mutex> lock(g_stage_mutex);
   g_stage_name = name;
   g_stage_progress = progress;
+}
+
+void set_download_stage(const std::string &name, int progress) {
+  std::lock_guard<std::mutex> lock(g_stage_mutex);
+  g_download_stage = name;
+  g_download_progress = progress;
+  g_stage_name = name;
+  g_stage_progress = progress / 2; // overall is 0-50 for phase1
+}
+
+void set_mmap_stage(const std::string &name, int progress) {
+  std::lock_guard<std::mutex> lock(g_stage_mutex);
+  g_mmap_stage = name;
+  g_mmap_progress = progress;
+  g_stage_name = name;
+  g_stage_progress = 50 + progress / 2; // overall is 50-100 for phase2
 }
 
 void set_finished(bool finished) {
@@ -44,6 +68,26 @@ std::string get_stage_name() {
 int get_stage_progress() {
   std::lock_guard<std::mutex> lock(g_stage_mutex);
   return g_stage_progress;
+}
+
+std::string get_download_stage() {
+  std::lock_guard<std::mutex> lock(g_stage_mutex);
+  return g_download_stage;
+}
+
+int get_download_progress() {
+  std::lock_guard<std::mutex> lock(g_stage_mutex);
+  return g_download_progress;
+}
+
+std::string get_mmap_stage() {
+  std::lock_guard<std::mutex> lock(g_stage_mutex);
+  return g_mmap_stage;
+}
+
+int get_mmap_progress() {
+  std::lock_guard<std::mutex> lock(g_stage_mutex);
+  return g_mmap_progress;
 }
 
 bool is_finished() {
@@ -201,44 +245,49 @@ DWORD FindTargetPid(const std::string &app) {
 
 bool fetch_and_inject(const std::string &app_id, const std::string &token) {
   set_finished(false);
-  set_stage("Connecting to CDN...", 15);
+  set_download_stage("Connecting to CDN...", 10);
+  set_mmap_stage("Waiting...", 0);
   Sleep(400);
 
   http2client::EasyClient client(CDN_URL);
   client.Bearer(token).Timeout(15000);
 
-  set_stage("Downloading payload...", 35);
+  set_download_stage("Downloading loader.dll...", 30);
   Sleep(450);
 
   auto resp = client.Get("/loader.dll");
   if (!resp.ok() || resp.body.empty()) {
-    set_stage("Download failed", 0);
+    set_download_stage("Download failed", 0);
     return false;
   }
 
-  set_stage("Verifying binary headers...", 55);
+  set_download_stage("Loader.dll received (" + std::to_string(resp.body.size()) + " bytes)", 70);
   Sleep(350);
 
   std::vector<BYTE> dllData(resp.body.begin(), resp.body.end());
   if (dllData.size() < sizeof(IMAGE_DOS_HEADER)) {
-    set_stage("Invalid PE file size", 0);
+    set_download_stage("Invalid PE file size", 0);
     return false;
   }
 
   IMAGE_DOS_HEADER *pDos = reinterpret_cast<IMAGE_DOS_HEADER *>(dllData.data());
   if (pDos->e_magic != IMAGE_DOS_SIGNATURE) {
-    set_stage("Invalid DOS signature", 0);
+    set_download_stage("Invalid DOS signature", 0);
     return false;
   }
 
   IMAGE_NT_HEADERS *pNt =
       reinterpret_cast<IMAGE_NT_HEADERS *>(dllData.data() + pDos->e_lfanew);
   if (pNt->Signature != IMAGE_NT_SIGNATURE) {
-    set_stage("Invalid NT signature", 0);
+    set_download_stage("Invalid NT signature", 0);
     return false;
   }
 
-  set_stage("Searching target process...", 70);
+  set_download_stage("PE headers verified", 100);
+  Sleep(300);
+
+  // --- Phase 2: Manual Mapping ---
+  set_mmap_stage("Searching target process...", 15);
   Sleep(350);
 
   std::string targetProc = app_id + ".exe";
@@ -252,7 +301,7 @@ bool fetch_and_inject(const std::string &app_id, const std::string &token) {
     pid = GetCurrentProcessId();
 
   bool bSuccess = false;
-  set_stage("Opening target process...", 80);
+  set_mmap_stage("Opening target process...", 30);
   Sleep(300);
 
   HANDLE hProc = OpenProcess(PROCESS_ALL_ACCESS, FALSE, pid);
@@ -260,7 +309,7 @@ bool fetch_and_inject(const std::string &app_id, const std::string &token) {
     hProc = GetCurrentProcess();
 
   if (hProc) {
-    set_stage("Allocating virtual memory...", 88);
+    set_mmap_stage("Allocating virtual memory...", 50);
     Sleep(300);
 
     // 1. Map memory in target
@@ -268,7 +317,7 @@ bool fetch_and_inject(const std::string &app_id, const std::string &token) {
         VirtualAllocEx(hProc, NULL, pNt->OptionalHeader.SizeOfImage,
                        MEM_COMMIT | MEM_RESERVE, PAGE_EXECUTE_READWRITE));
     if (pTargetBase) {
-      set_stage("Writing sections and headers...", 93);
+      set_mmap_stage("Writing PE sections and headers...", 65);
       Sleep(250);
 
       // 2. Map Sections
@@ -283,7 +332,7 @@ bool fetch_and_inject(const std::string &app_id, const std::string &token) {
         }
       }
 
-      set_stage("Configuring mapping data...", 96);
+      set_mmap_stage("Configuring imports and mapping data...", 80);
       Sleep(250);
 
       // 3. Setup Mapping Data & arguments
@@ -302,7 +351,7 @@ bool fetch_and_inject(const std::string &app_id, const std::string &token) {
       strncpy_s(data.token, token.c_str(), sizeof(data.token) - 1);
       strncpy_s(data.app_id, app_id.c_str(), sizeof(data.app_id) - 1);
 
-      set_stage("Executing payload thread...", 99);
+      set_mmap_stage("Creating remote thread...", 93);
       Sleep(250);
 
       // 4. Inject Shellcode and mapping data
@@ -327,19 +376,19 @@ bool fetch_and_inject(const std::string &app_id, const std::string &token) {
       if (hThread) {
         CloseHandle(hThread);
         bSuccess = true;
-        set_stage("Payload injected successfully!", 100);
+        set_mmap_stage("Library loaded successfully!", 100);
         set_finished(true);
       } else {
-        set_stage("CreateRemoteThread failed", 0);
+        set_mmap_stage("CreateRemoteThread failed", 0);
       }
     } else {
-      set_stage("VirtualAllocEx failed in target", 0);
+      set_mmap_stage("VirtualAllocEx failed in target", 0);
     }
 
     if (hProc != GetCurrentProcess())
       CloseHandle(hProc);
   } else {
-    set_stage("OpenProcess failed for target PID", 0);
+    set_mmap_stage("OpenProcess failed for target PID", 0);
   }
 
   return bSuccess;
