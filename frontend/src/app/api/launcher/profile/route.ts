@@ -8,11 +8,12 @@ const BACKEND_BASE_URL =
 
 export async function GET(request: NextRequest) {
   try {
-    // 1. Extract token from header or query param (?token=) or cookies
+    // 1. Extract token from query param (?token= or ?launcher_token=) or header or cookies
     const token = 
+      request.nextUrl.searchParams.get('token') ||
+      request.nextUrl.searchParams.get('launcher_token') ||
       request.headers.get('x-launcher-token') || 
       request.headers.get('authorization')?.replace(/^Bearer\s+/i, '') ||
-      request.nextUrl.searchParams.get('token') ||
       request.cookies.get('launcher_token')?.value ||
       '';
 
@@ -20,22 +21,31 @@ export async function GET(request: NextRequest) {
       return NextResponse.json(
         { 
           error: 'Missing launcher token', 
-          message: 'Please provide X-Launcher-Token header or ?token=<token> parameter.' 
+          message: 'Please provide ?token=<launcher_token> parameter in URL.' 
         },
         { status: 401 }
       );
     }
 
-    // 2. Build target URL
+    // 2. Build target URL with token in query string
     const baseUrl = BACKEND_BASE_URL.replace(/\/+$/, '');
-    const targetUrl = `${baseUrl}/api/launcher/profile`;
+    const url = new URL(`${baseUrl}/api/launcher/profile`);
+    url.searchParams.set('token', token);
+    url.searchParams.set('launcher_token', token);
+
+    // Forward any extra query parameters
+    request.nextUrl.searchParams.forEach((value, key) => {
+      if (!url.searchParams.has(key)) {
+        url.searchParams.set(key, value);
+      }
+    });
 
     const headers: Record<string, string> = {
       'Accept': 'application/json',
       'X-Launcher-Token': token,
     };
 
-    const response = await fetch(targetUrl, {
+    const response = await fetch(url.toString(), {
       method: 'GET',
       headers,
       cache: 'no-store',
@@ -54,7 +64,7 @@ export async function GET(request: NextRequest) {
         data || { 
           error: 'Backend returned non-OK status', 
           status: response.status,
-          targetUrl,
+          targetUrl: url.toString(),
           details: responseText || response.statusText 
         },
         { status: response.status }

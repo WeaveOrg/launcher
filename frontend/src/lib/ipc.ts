@@ -279,7 +279,8 @@ class WeaveIPCBridge {
   public async getLauncherProfile(token?: string): Promise<LauncherProfile | null> {
     const launcherToken = token || (typeof window !== 'undefined' ? localStorage.getItem('launcher_token') || '' : '');
     try {
-      const res = await fetch('/api/launcher/profile', {
+      const query = launcherToken ? `?token=${encodeURIComponent(launcherToken)}` : '';
+      const res = await fetch(`/api/launcher/profile${query}`, {
         headers: {
           'X-Launcher-Token': launcherToken
         }
@@ -297,7 +298,13 @@ class WeaveIPCBridge {
   public async getChangelogs(productId?: string, token?: string): Promise<ChangelogItem[]> {
     const launcherToken = token || (typeof window !== 'undefined' ? localStorage.getItem('launcher_token') || '' : '');
     try {
-      const query = productId ? `?product_id=${encodeURIComponent(productId)}` : '';
+      const params = new URLSearchParams();
+      if (productId) params.set('product_id', productId);
+      if (launcherToken) {
+        params.set('token', launcherToken);
+        params.set('launcher_token', launcherToken);
+      }
+      const query = params.toString() ? `?${params.toString()}` : '';
       const res = await fetch(`/api/launcher/changelogs${query}`, {
         headers: {
           'X-Launcher-Token': launcherToken

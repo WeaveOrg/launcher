@@ -8,23 +8,36 @@ const BACKEND_BASE_URL =
 
 export async function GET(request: NextRequest) {
   try {
-    // 1. Extract token from header or query param (?token=) or cookies
+    // 1. Extract token from query param (?token= or ?launcher_token=) or header or cookies
     const token = 
+      request.nextUrl.searchParams.get('token') ||
+      request.nextUrl.searchParams.get('launcher_token') ||
       request.headers.get('x-launcher-token') || 
       request.headers.get('authorization')?.replace(/^Bearer\s+/i, '') ||
-      request.nextUrl.searchParams.get('token') ||
       request.cookies.get('launcher_token')?.value ||
       '';
 
     const productId = request.nextUrl.searchParams.get('product_id');
 
-    // 2. Build target URL
+    // 2. Build target URL with query params
     const baseUrl = BACKEND_BASE_URL.replace(/\/+$/, '');
     const url = new URL(`${baseUrl}/api/launcher/changelogs`);
+
+    if (token) {
+      url.searchParams.set('token', token);
+      url.searchParams.set('launcher_token', token);
+    }
 
     if (productId) {
       url.searchParams.set('product_id', productId);
     }
+
+    // Forward any other query parameters
+    request.nextUrl.searchParams.forEach((value, key) => {
+      if (!url.searchParams.has(key)) {
+        url.searchParams.set(key, value);
+      }
+    });
 
     const headers: Record<string, string> = {
       'Accept': 'application/json',

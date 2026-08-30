@@ -33,8 +33,8 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ initialToken, onSuccess 
 
       try {
         setLoading(true);
-        // Call Next.js server proxy GET /api/launcher/profile with X-Launcher-Token
-        const res = await fetch('/api/launcher/profile', {
+        // Call Next.js server proxy GET /api/launcher/profile?token=... with X-Launcher-Token
+        const res = await fetch(`/api/launcher/profile?token=${encodeURIComponent(token)}`, {
           method: 'GET',
           headers: {
             'X-Launcher-Token': token,
