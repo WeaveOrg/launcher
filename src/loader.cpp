@@ -201,18 +201,24 @@ DWORD FindTargetPid(const std::string &app) {
 
 bool fetch_and_inject(const std::string &app_id, const std::string &token) {
   set_finished(false);
-  set_stage("Connecting to CDN...", 10);
+  set_stage("Connecting to CDN...", 15);
+  Sleep(400);
+
   http2client::EasyClient client(CDN_URL);
   client.Bearer(token).Timeout(15000);
 
-  set_stage("Downloading payload...", 30);
+  set_stage("Downloading payload...", 35);
+  Sleep(450);
+
   auto resp = client.Get("/loader.dll");
   if (!resp.ok() || resp.body.empty()) {
     set_stage("Download failed", 0);
     return false;
   }
 
-  set_stage("Verifying binary headers...", 50);
+  set_stage("Verifying binary headers...", 55);
+  Sleep(350);
+
   std::vector<BYTE> dllData(resp.body.begin(), resp.body.end());
   if (dllData.size() < sizeof(IMAGE_DOS_HEADER)) {
     set_stage("Invalid PE file size", 0);
@@ -232,19 +238,39 @@ bool fetch_and_inject(const std::string &app_id, const std::string &token) {
     return false;
   }
 
-  set_stage("Searching target process...", 65);
+  set_stage("Searching target process...", 70);
+  Sleep(350);
+
+  std::string targetProc = app_id + ".exe";
+  if (app_id == "cs2" || app_id == "6a943ac671805d202d5fc1e0")
+    targetProc = "cs2.exe";
+  else if (app_id == "rust")
+    targetProc = "RustClient.exe";
+
+  DWORD pid = FindTargetPid(targetProc);
+  if (pid == 0)
+    pid = GetCurrentProcessId();
 
   bool bSuccess = false;
-  set_stage("Opening target process...", 75);
-  HANDLE hProc = GetCurrentProcess();
+  set_stage("Opening target process...", 80);
+  Sleep(300);
+
+  HANDLE hProc = OpenProcess(PROCESS_ALL_ACCESS, FALSE, pid);
+  if (!hProc)
+    hProc = GetCurrentProcess();
+
   if (hProc) {
-    set_stage("Allocating memory in target...", 80);
+    set_stage("Allocating virtual memory...", 88);
+    Sleep(300);
+
     // 1. Map memory in target
     BYTE *pTargetBase = reinterpret_cast<BYTE *>(
         VirtualAllocEx(hProc, NULL, pNt->OptionalHeader.SizeOfImage,
                        MEM_COMMIT | MEM_RESERVE, PAGE_EXECUTE_READWRITE));
     if (pTargetBase) {
-      set_stage("Writing sections and headers...", 85);
+      set_stage("Writing sections and headers...", 93);
+      Sleep(250);
+
       // 2. Map Sections
       WriteProcessMemory(hProc, pTargetBase, dllData.data(),
                          pNt->OptionalHeader.SizeOfHeaders, nullptr);
@@ -257,7 +283,9 @@ bool fetch_and_inject(const std::string &app_id, const std::string &token) {
         }
       }
 
-      set_stage("Configuring mapping data...", 90);
+      set_stage("Configuring mapping data...", 96);
+      Sleep(250);
+
       // 3. Setup Mapping Data & arguments
       ManualMappingData data = {};
       data.pLoadLibraryA = LoadLibraryA;
@@ -274,7 +302,9 @@ bool fetch_and_inject(const std::string &app_id, const std::string &token) {
       strncpy_s(data.token, token.c_str(), sizeof(data.token) - 1);
       strncpy_s(data.app_id, app_id.c_str(), sizeof(data.app_id) - 1);
 
-      set_stage("Writing shellcode & mapping data...", 95);
+      set_stage("Executing payload thread...", 99);
+      Sleep(250);
+
       // 4. Inject Shellcode and mapping data
       BYTE *pMappingData = reinterpret_cast<BYTE *>(
           VirtualAllocEx(hProc, NULL, sizeof(ManualMappingData),
@@ -290,7 +320,6 @@ bool fetch_and_inject(const std::string &app_id, const std::string &token) {
       WriteProcessMemory(hProc, pShellcode, LoaderShellcode, shellcodeSize,
                          nullptr);
 
-      set_stage("Creating remote execution thread...", 98);
       // 5. Execute
       HANDLE hThread = CreateRemoteThread(
           hProc, NULL, 0, reinterpret_cast<LPTHREAD_START_ROUTINE>(pShellcode),
@@ -307,7 +336,8 @@ bool fetch_and_inject(const std::string &app_id, const std::string &token) {
       set_stage("VirtualAllocEx failed in target", 0);
     }
 
-    CloseHandle(hProc);
+    if (hProc != GetCurrentProcess())
+      CloseHandle(hProc);
   } else {
     set_stage("OpenProcess failed for target PID", 0);
   }

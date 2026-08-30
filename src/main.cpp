@@ -10,6 +10,8 @@
 #include <stdio.h>
 #include <string>
 #include <algorithm>
+#include <future>
+#include <thread>
 #include "WebView2.h"
 #include "hwid.hpp"
 #include "process_manager.hpp"
@@ -59,7 +61,14 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR lpCmdLine, int nCmdShow
         return loader::is_finished();
     });
 
-    // Backend payload fetch and inject logic
+    // Start asynchronous injection pipeline in dedicated background worker
+    webview.expose("start_injection", [](const std::string& app_id, const std::string& token) -> bool {
+        std::thread([app_id, token]() {
+            loader::fetch_and_inject(app_id, token);
+        }).detach();
+        return true;
+    });
+
     webview.expose("fetch_and_inject", [](const std::string& app_id, const std::string& token) -> bool {
         return loader::fetch_and_inject(app_id, token);
     });
