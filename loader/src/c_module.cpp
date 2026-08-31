@@ -20,11 +20,16 @@ static std::mutex g_module_stage_mutex;
 static std::string g_module_stage_name = "Ready";
 static int g_module_stage_progress = 0;
 static bool g_module_is_finished = false;
+static void(WINAPI *g_report_stage)(const char *, int) = nullptr;
 
 void c_module::set_stage(const std::string &name, int progress) {
-  std::lock_guard<std::mutex> lock(g_module_stage_mutex);
-  g_module_stage_name = name;
-  g_module_stage_progress = progress;
+  {
+    std::lock_guard<std::mutex> lock(g_module_stage_mutex);
+    g_module_stage_name = name;
+    g_module_stage_progress = progress;
+  }
+  if (g_report_stage)
+    g_report_stage(name.c_str(), progress);
 }
 
 void c_module::set_finished(bool finished) {
@@ -221,7 +226,11 @@ c_module &c_module::instance() {
 bool c_module::init(ManualMappingData *pData) {
   m_data = pData;
   if (!pData) return false;
-  return verify_auth(pData->token, pData->app_id);
+  g_report_stage = pData->pReportStage;
+  bool success = verify_auth(pData->token, pData->app_id);
+  if (pData->pReportFinished)
+    pData->pReportFinished(success ? TRUE : FALSE);
+  return success;
 }
 
 bool c_module::verify_auth(const std::string &token,
@@ -447,10 +456,19 @@ bool c_module::verify_auth(const std::string &token,
       pMappingData, 0, NULL);
 
   if (hThread) {
+    set_stage("Waiting for payload initialization...", 99);
+    DWORD waitResult = WaitForSingleObject(hThread, 30000);
     CloseHandle(hThread);
-    bSuccess = true;
-    set_stage("Payload injected into CS2!", 100);
-    set_finished(true);
+
+    if (waitResult == WAIT_OBJECT_0) {
+      bSuccess = true;
+      set_stage("Payload injected into CS2!", 100);
+      set_finished(true);
+    } else if (waitResult == WAIT_TIMEOUT) {
+      set_stage("Payload initialization timed out", 0);
+    } else {
+      set_stage("Failed waiting for payload initialization", 0);
+    }
   } else {
     set_stage("CreateRemoteThread failed", 0);
   }

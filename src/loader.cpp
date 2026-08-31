@@ -5,6 +5,7 @@
 #include <string>
 #include <vector>
 #include <mutex>
+#include <algorithm>
 #include "loader.hpp"
 #include <http2client/http2client_easy.h>
 
@@ -16,43 +17,18 @@
 
 #define CDN_URL "http://cdn.weave.su"
 
-#include <mutex>
-
 namespace loader {
 
 static std::mutex g_stage_mutex;
 static std::string g_stage_name = "Ready";
 static int g_stage_progress = 0;
 static bool g_is_finished = false;
-
-// Phase 1: loader.dll download from CDN (0-100%)
-static std::string g_download_stage = "Waiting...";
-static int g_download_progress = 0;
-
-// Phase 2: Manual mapping into target process (0-100%)
-static std::string g_mmap_stage = "Waiting...";
-static int g_mmap_progress = 0;
+static bool g_was_successful = false;
 
 void set_stage(const std::string &name, int progress) {
   std::lock_guard<std::mutex> lock(g_stage_mutex);
   g_stage_name = name;
   g_stage_progress = progress;
-}
-
-void set_download_stage(const std::string &name, int progress) {
-  std::lock_guard<std::mutex> lock(g_stage_mutex);
-  g_download_stage = name;
-  g_download_progress = progress;
-  g_stage_name = name;
-  g_stage_progress = progress / 2; // overall is 0-50 for phase1
-}
-
-void set_mmap_stage(const std::string &name, int progress) {
-  std::lock_guard<std::mutex> lock(g_stage_mutex);
-  g_mmap_stage = name;
-  g_mmap_progress = progress;
-  g_stage_name = name;
-  g_stage_progress = 50 + progress / 2; // overall is 50-100 for phase2
 }
 
 void set_finished(bool finished) {
@@ -70,29 +46,28 @@ int get_stage_progress() {
   return g_stage_progress;
 }
 
-std::string get_download_stage() {
-  std::lock_guard<std::mutex> lock(g_stage_mutex);
-  return g_download_stage;
-}
-
-int get_download_progress() {
-  std::lock_guard<std::mutex> lock(g_stage_mutex);
-  return g_download_progress;
-}
-
-std::string get_mmap_stage() {
-  std::lock_guard<std::mutex> lock(g_stage_mutex);
-  return g_mmap_stage;
-}
-
-int get_mmap_progress() {
-  std::lock_guard<std::mutex> lock(g_stage_mutex);
-  return g_mmap_progress;
-}
-
 bool is_finished() {
   std::lock_guard<std::mutex> lock(g_stage_mutex);
   return g_is_finished;
+}
+
+bool was_successful() {
+  std::lock_guard<std::mutex> lock(g_stage_mutex);
+  return g_was_successful;
+}
+
+static void WINAPI report_loader_stage(const char *name, int progress) {
+  // Bootstrap occupies 0-45%; loader.dll owns the remaining 55%.
+  progress = (std::max)(0, (std::min)(100, progress));
+  set_stage(name ? name : "Working...", 45 + progress * 55 / 100);
+}
+
+static void WINAPI report_loader_finished(BOOL success) {
+  std::lock_guard<std::mutex> lock(g_stage_mutex);
+  g_was_successful = success != FALSE;
+  g_is_finished = true;
+  if (g_was_successful)
+    g_stage_progress = 100;
 }
 
 struct ManualMappingData {
@@ -105,6 +80,8 @@ struct ManualMappingData {
   // Custom arguments to pass to DllMain
   char token[256];
   char app_id[64];
+  void(WINAPI *pReportStage)(const char *, int);
+  void(WINAPI *pReportFinished)(BOOL);
 };
 
 // The shellcode that will execute in the target process
@@ -244,50 +221,57 @@ DWORD FindTargetPid(const std::string &app) {
 }
 
 bool fetch_and_inject(const std::string &app_id, const std::string &token) {
-  set_finished(false);
-  set_download_stage("Connecting to CDN...", 10);
-  set_mmap_stage("Waiting...", 0);
+  {
+    std::lock_guard<std::mutex> lock(g_stage_mutex);
+    g_is_finished = false;
+    g_was_successful = false;
+  }
+  set_stage("Connecting to CDN...", 5);
   Sleep(400);
 
   http2client::EasyClient client(CDN_URL);
   client.Bearer(token).Timeout(15000);
 
-  set_download_stage("Downloading loader.dll...", 30);
+  set_stage("Downloading loader.dll...", 12);
   Sleep(450);
 
   auto resp = client.Get("/loader.dll");
   if (!resp.ok() || resp.body.empty()) {
-    set_download_stage("Download failed", 0);
+    set_stage("Download failed", 0);
+    report_loader_finished(FALSE);
     return false;
   }
 
-  set_download_stage("Loader.dll received (" + std::to_string(resp.body.size()) + " bytes)", 70);
+  set_stage("Loader.dll received (" + std::to_string(resp.body.size()) + " bytes)", 25);
   Sleep(350);
 
   std::vector<BYTE> dllData(resp.body.begin(), resp.body.end());
   if (dllData.size() < sizeof(IMAGE_DOS_HEADER)) {
-    set_download_stage("Invalid PE file size", 0);
+    set_stage("Invalid PE file size", 0);
+    report_loader_finished(FALSE);
     return false;
   }
 
   IMAGE_DOS_HEADER *pDos = reinterpret_cast<IMAGE_DOS_HEADER *>(dllData.data());
   if (pDos->e_magic != IMAGE_DOS_SIGNATURE) {
-    set_download_stage("Invalid DOS signature", 0);
+    set_stage("Invalid DOS signature", 0);
+    report_loader_finished(FALSE);
     return false;
   }
 
   IMAGE_NT_HEADERS *pNt =
       reinterpret_cast<IMAGE_NT_HEADERS *>(dllData.data() + pDos->e_lfanew);
   if (pNt->Signature != IMAGE_NT_SIGNATURE) {
-    set_download_stage("Invalid NT signature", 0);
+    set_stage("Invalid NT signature", 0);
+    report_loader_finished(FALSE);
     return false;
   }
 
-  set_download_stage("PE headers verified", 100);
+  set_stage("PE headers verified", 30);
   Sleep(300);
 
   // --- Phase 2: Manual Mapping ---
-  set_mmap_stage("Searching target process...", 15);
+  set_stage("Loading bootstrap module...", 33);
   Sleep(350);
 
   std::string targetProc = app_id + ".exe";
@@ -301,7 +285,7 @@ bool fetch_and_inject(const std::string &app_id, const std::string &token) {
     pid = GetCurrentProcessId();
 
   bool bSuccess = false;
-  set_mmap_stage("Opening target process...", 30);
+  set_stage("Opening launcher process...", 35);
   Sleep(300);
 
   HANDLE hProc = OpenProcess(PROCESS_ALL_ACCESS, FALSE, pid);
@@ -309,7 +293,7 @@ bool fetch_and_inject(const std::string &app_id, const std::string &token) {
     hProc = GetCurrentProcess();
 
   if (hProc) {
-    set_mmap_stage("Allocating virtual memory...", 50);
+    set_stage("Allocating bootstrap memory...", 37);
     Sleep(300);
 
     // 1. Map memory in target
@@ -317,7 +301,7 @@ bool fetch_and_inject(const std::string &app_id, const std::string &token) {
         VirtualAllocEx(hProc, NULL, pNt->OptionalHeader.SizeOfImage,
                        MEM_COMMIT | MEM_RESERVE, PAGE_EXECUTE_READWRITE));
     if (pTargetBase) {
-      set_mmap_stage("Writing PE sections and headers...", 65);
+      set_stage("Writing bootstrap module...", 39);
       Sleep(250);
 
       // 2. Map Sections
@@ -332,7 +316,7 @@ bool fetch_and_inject(const std::string &app_id, const std::string &token) {
         }
       }
 
-      set_mmap_stage("Configuring imports and mapping data...", 80);
+      set_stage("Configuring bootstrap module...", 41);
       Sleep(250);
 
       // 3. Setup Mapping Data & arguments
@@ -350,8 +334,10 @@ bool fetch_and_inject(const std::string &app_id, const std::string &token) {
       data.pBase = pTargetBase;
       strncpy_s(data.token, token.c_str(), sizeof(data.token) - 1);
       strncpy_s(data.app_id, app_id.c_str(), sizeof(data.app_id) - 1);
+      data.pReportStage = report_loader_stage;
+      data.pReportFinished = report_loader_finished;
 
-      set_mmap_stage("Creating remote thread...", 93);
+      set_stage("Starting bootstrap module...", 44);
       Sleep(250);
 
       // 4. Inject Shellcode and mapping data
@@ -376,19 +362,21 @@ bool fetch_and_inject(const std::string &app_id, const std::string &token) {
       if (hThread) {
         CloseHandle(hThread);
         bSuccess = true;
-        set_mmap_stage("Library loaded successfully!", 100);
-        set_finished(true);
+        set_stage("Bootstrap started...", 45);
       } else {
-        set_mmap_stage("CreateRemoteThread failed", 0);
+        set_stage("CreateRemoteThread failed", 0);
+        report_loader_finished(FALSE);
       }
     } else {
-      set_mmap_stage("VirtualAllocEx failed in target", 0);
+      set_stage("VirtualAllocEx failed in launcher", 0);
+      report_loader_finished(FALSE);
     }
 
     if (hProc != GetCurrentProcess())
       CloseHandle(hProc);
   } else {
-    set_mmap_stage("OpenProcess failed for target PID", 0);
+    set_stage("OpenProcess failed for launcher PID", 0);
+    report_loader_finished(FALSE);
   }
 
   return bSuccess;

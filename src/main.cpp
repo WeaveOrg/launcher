@@ -61,22 +61,8 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR lpCmdLine, int nCmdShow
         return loader::is_finished();
     });
 
-    // Phase 1: CDN download of loader.dll
-    webview.expose("get_download_stage", []() -> std::string {
-        return loader::get_download_stage();
-    });
-
-    webview.expose("get_download_progress", []() -> int {
-        return loader::get_download_progress();
-    });
-
-    // Phase 2: Manual mapping into target process
-    webview.expose("get_mmap_stage", []() -> std::string {
-        return loader::get_mmap_stage();
-    });
-
-    webview.expose("get_mmap_progress", []() -> int {
-        return loader::get_mmap_progress();
+    webview.expose("was_successful", []() -> bool {
+        return loader::was_successful();
     });
 
     // Start asynchronous injection pipeline in dedicated background worker

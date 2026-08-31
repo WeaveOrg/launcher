@@ -330,10 +330,8 @@ class WeaveIPCBridge {
     app: AppItem,
     token: string,
     onProgress: (
-      downloadStage: string,
-      downloadProgress: number,
-      mmapStage: string,
-      mmapProgress: number,
+      stage: string,
+      progress: number,
       isFinal: boolean
     ) => void
   ): Promise<{ success: boolean; message: string }> {
@@ -349,43 +347,38 @@ class WeaveIPCBridge {
         saucer.call('fetch_and_inject', [app.id, authToken]).catch(() => {});
       }
 
-      // Poll until is_finished is true or error
-      let maxWait = 300; // up to 30 seconds
-      while (maxWait-- > 0) {
+      // CS2 startup and module initialization can legitimately take minutes.
+      const deadline = Date.now() + 5 * 60 * 1000;
+      while (Date.now() < deadline) {
         try {
-          const [downloadStage, downloadProgress, mmapStage, mmapProgress, isFinished] = await Promise.all([
-            saucer.call<string>('get_download_stage', []).catch(() => 'Connecting...'),
-            saucer.call<number>('get_download_progress', []).catch(() => 0),
-            saucer.call<string>('get_mmap_stage', []).catch(() => 'Waiting...'),
-            saucer.call<number>('get_mmap_progress', []).catch(() => 0),
-            saucer.call<boolean>('is_finished', []).catch(() => false)
+          const [stage, progress, isFinished, succeeded] = await Promise.all([
+            saucer.call<string>('get_stage_name', []).catch(() => 'Connecting...'),
+            saucer.call<number>('get_stage_progress', []).catch(() => 0),
+            saucer.call<boolean>('is_finished', []).catch(() => false),
+            saucer.call<boolean>('was_successful', []).catch(() => false)
           ]);
 
           onProgress(
-            String(downloadStage || 'Connecting...'),
-            typeof downloadProgress === 'number' ? downloadProgress : 0,
-            String(mmapStage || 'Waiting...'),
-            typeof mmapProgress === 'number' ? mmapProgress : 0,
-            Boolean(isFinished)
+            String(stage || 'Connecting...'),
+            typeof progress === 'number' ? progress : 0,
+            Boolean(isFinished && succeeded)
           );
 
           if (isFinished) {
+            if (!succeeded) {
+              return {
+                success: false,
+                message: String(stage || 'Loader initialization failed.')
+              };
+            }
             return {
               success: true,
               message: `[Weave Loader] Backend payload loaded for ${app.name} (${app.processName}).`
             };
           }
-
-          const combinedStage = String(downloadStage || '') + String(mmapStage || '');
-          if (combinedStage.toLowerCase().includes('fail')) {
-            return {
-              success: false,
-              message: String(downloadStage || mmapStage || 'Injection failed')
-            };
-          }
         } catch (e) {}
 
-        await new Promise((r) => setTimeout(r, 60));
+        await new Promise((r) => setTimeout(r, 100));
       }
 
       return {

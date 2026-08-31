@@ -15,6 +15,8 @@ struct ManualMappingData {
   BYTE *pBase;
   char token[256];
   char app_id[64];
+  void(WINAPI *pReportStage)(const char *, int);
+  void(WINAPI *pReportFinished)(BOOL);
 };
 
 struct AuthVerifyRequest {

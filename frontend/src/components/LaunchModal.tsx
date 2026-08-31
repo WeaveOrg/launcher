@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useState, useEffect } from 'react';
-import { Loader2, CheckCircle2, AlertCircle, Download, Cpu } from 'lucide-react';
+import { Loader2, CheckCircle2, AlertCircle, Cpu } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { AppItem, ipc } from '@/lib/ipc';
 
@@ -18,8 +18,7 @@ interface PhaseState {
 }
 
 export const LaunchModal: React.FC<LaunchModalProps> = ({ app, token, onClose, onLog }) => {
-  const [download, setDownload] = useState<PhaseState>({ stage: 'Connecting to CDN...', progress: 0 });
-  const [mmap, setMmap] = useState<PhaseState>({ stage: 'Waiting...', progress: 0 });
+  const [phase, setPhase] = useState<PhaseState>({ stage: 'Connecting to CDN...', progress: 0 });
   const [status, setStatus] = useState<'loading' | 'success' | 'error'>('loading');
   const [countdown, setCountdown] = useState<number | null>(null);
   const [errorMsg, setErrorMsg] = useState('');
@@ -31,16 +30,14 @@ export const LaunchModal: React.FC<LaunchModalProps> = ({ app, token, onClose, o
     const runPipeline = async () => {
       onLog(`Started injection for ${app.name}`);
       setStatus('loading');
-      setDownload({ stage: 'Connecting to CDN...', progress: 0 });
-      setMmap({ stage: 'Waiting...', progress: 0 });
+      setPhase({ stage: 'Connecting to CDN...', progress: 0 });
 
       const res = await ipc.launchApp(
         app,
         token || '',
-        (dlStage, dlProgress, mmapStage, mmapProgress, isFinal) => {
+        (stage, progress, isFinal) => {
           if (!mounted) return;
-          setDownload({ stage: dlStage, progress: dlProgress });
-          setMmap({ stage: mmapStage, progress: mmapProgress });
+          setPhase({ stage, progress });
           if (isFinal) setStatus('success');
         }
       );
@@ -48,8 +45,7 @@ export const LaunchModal: React.FC<LaunchModalProps> = ({ app, token, onClose, o
       if (!mounted) return;
       if (res.success) {
         setStatus('success');
-        setDownload(d => ({ ...d, progress: 100 }));
-        setMmap({ stage: 'Library loaded successfully!', progress: 100 });
+        setPhase({ stage: 'Payload injected into CS2!', progress: 100 });
         setCountdown(3);
 
         const interval = setInterval(() => {
@@ -115,89 +111,43 @@ export const LaunchModal: React.FC<LaunchModalProps> = ({ app, token, onClose, o
               <p className="text-xs text-[#555]">Weave Loader Engine v2</p>
             </div>
 
-            {/* Two Phase Progress Bars */}
+            {/* Unified progress */}
             <div className="w-full flex flex-col gap-3 mt-1">
-
-              {/* Phase 1: Download loader.dll */}
               <div className="w-full flex flex-col gap-1.5">
                 <div className="flex items-center justify-between px-0.5">
                   <div className="flex items-center gap-1.5">
-                    <Download className={`w-3 h-3 ${isError ? 'text-rose-400' : isSuccess ? 'text-emerald-400' : 'text-[#ff8c00]'}`} />
-                    <span className="text-[10px] font-semibold text-[#666] uppercase tracking-wider">Loader Download</span>
+                    <Cpu className={`w-3 h-3 ${isError ? 'text-rose-400' : isSuccess ? 'text-emerald-400' : 'text-[#ff8c00]'}`} />
+                    <span className="text-[10px] font-semibold text-[#666] uppercase tracking-wider">Launch progress</span>
                   </div>
                   <span className={`text-[10px] font-bold tabular-nums ${
                     isError ? 'text-rose-400' : isSuccess ? 'text-emerald-400' : 'text-[#ff8c00]'
                   }`}>
-                    {download.progress}%
+                    {phase.progress}%
                   </span>
                 </div>
                 <div className="w-full h-1.5 bg-[#1e1e1e] rounded-full overflow-hidden relative">
                   <motion.div
                     initial={{ width: 0 }}
-                    animate={{ width: `${download.progress}%` }}
+                    animate={{ width: `${phase.progress}%` }}
                     transition={{ ease: 'easeOut', duration: 0.3 }}
                     className={`absolute top-0 bottom-0 left-0 rounded-full ${
                       isError
                         ? 'bg-rose-500 shadow-[0_0_6px_#f43f5e]'
-                        : isSuccess || download.progress === 100
+                        : isSuccess || phase.progress === 100
                         ? 'bg-emerald-500 shadow-[0_0_8px_#10b981]'
                         : 'bg-[#ff8c00] shadow-[0_0_6px_#ff8c00]'
                     }`}
                   />
                 </div>
                 <motion.p
-                  key={download.stage}
+                  key={phase.stage}
                   initial={{ opacity: 0, y: 1 }}
                   animate={{ opacity: 1, y: 0 }}
                   className={`text-[10px] font-mono text-left truncate ${
-                    isError ? 'text-rose-400' : download.progress === 100 ? 'text-emerald-400' : 'text-[#555]'
+                    isError ? 'text-rose-400' : phase.progress === 100 ? 'text-emerald-400' : 'text-[#555]'
                   }`}
                 >
-                  {download.stage}
-                </motion.p>
-              </div>
-
-              {/* Divider */}
-              <div className="w-full h-px bg-[#1e1e1e]" />
-
-              {/* Phase 2: Library Mapping */}
-              <div className="w-full flex flex-col gap-1.5">
-                <div className="flex items-center justify-between px-0.5">
-                  <div className="flex items-center gap-1.5">
-                    <Cpu className={`w-3 h-3 ${isError ? 'text-rose-400' : isSuccess ? 'text-emerald-400' : mmap.progress > 0 ? 'text-[#ff8c00]' : 'text-[#333]'}`} />
-                    <span className="text-[10px] font-semibold text-[#666] uppercase tracking-wider">Loading Library</span>
-                  </div>
-                  <span className={`text-[10px] font-bold tabular-nums ${
-                    isError ? 'text-rose-400' : isSuccess ? 'text-emerald-400' : mmap.progress > 0 ? 'text-[#ff8c00]' : 'text-[#333]'
-                  }`}>
-                    {mmap.progress}%
-                  </span>
-                </div>
-                <div className="w-full h-1.5 bg-[#1e1e1e] rounded-full overflow-hidden relative">
-                  <motion.div
-                    initial={{ width: 0 }}
-                    animate={{ width: `${mmap.progress}%` }}
-                    transition={{ ease: 'easeOut', duration: 0.3 }}
-                    className={`absolute top-0 bottom-0 left-0 rounded-full ${
-                      isError
-                        ? 'bg-rose-500 shadow-[0_0_6px_#f43f5e]'
-                        : isSuccess || mmap.progress === 100
-                        ? 'bg-emerald-500 shadow-[0_0_8px_#10b981]'
-                        : mmap.progress > 0
-                        ? 'bg-[#ff8c00] shadow-[0_0_6px_#ff8c00]'
-                        : 'bg-[#2a2a2a]'
-                    }`}
-                  />
-                </div>
-                <motion.p
-                  key={mmap.stage}
-                  initial={{ opacity: 0, y: 1 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  className={`text-[10px] font-mono text-left truncate ${
-                    isError ? 'text-rose-400' : mmap.progress === 100 ? 'text-emerald-400' : mmap.progress > 0 ? 'text-[#555]' : 'text-[#333]'
-                  }`}
-                >
-                  {mmap.stage}
+                  {phase.stage}
                 </motion.p>
               </div>
             </div>
