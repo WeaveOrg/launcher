@@ -26,14 +26,16 @@ export const LauncherRedesign: React.FC<LauncherRedesignProps> = ({
   const safeApps = Array.isArray(apps) ? apps : [];
   const safeChangelogs = Array.isArray(changelogs) ? changelogs : [];
 
-  // CS2 is the primary app (ObjectID: 6a943ac671805d202d5fc1e0)
-  const cs2App = safeApps.find(a => a?.id === '6a943ac671805d202d5fc1e0' || a?.name?.includes('Counter') || a?.name?.includes('CS')) || ({
-    id: '6a943ac671805d202d5fc1e0',
-    name: 'Counter-Strike 2',
-    processName: 'cs2.exe',
+  // Get the first available app from the backend, or default fallback if backend is empty
+  const activeApp = safeApps.length > 0 ? safeApps[0] : ({
+    id: '0',
+    name: 'Loading...',
+    processName: 'unknown.exe',
     status: 'Undetected',
-    version: safeChangelogs.length > 0 ? safeChangelogs[0].version : 'v2.1.4'
+    banner: ''
   } as AppItem);
+
+  const latestVersion = safeChangelogs.length > 0 ? safeChangelogs[0].version : '...';
 
   return (
     <div className="flex flex-col h-screen w-screen bg-[#0d0d0d] text-[#ddd] font-sans selection:bg-[#ff8c00] selection:text-black">
@@ -50,19 +52,19 @@ export const LauncherRedesign: React.FC<LauncherRedesignProps> = ({
         <div className="flex items-center gap-3 no-drag">
           <div className="w-8 h-8 rounded-md bg-[#1a1a1a] border border-[#333] flex items-center justify-center overflow-hidden">
             <img 
-              src="https://cdn.akamai.steamstatic.com/steam/apps/730/header.jpg" 
-              alt="CS2"
+              src={activeApp.banner || "https://cdn.akamai.steamstatic.com/steam/apps/730/header.jpg"} 
+              alt={activeApp.name}
               className="w-full h-full object-cover"
               onError={(e) => { e.currentTarget.style.display = 'none'; }}
             />
           </div>
           <div className="flex flex-col">
-            <span className="font-bold text-white text-sm tracking-wide">{cs2App.name}</span>
+            <span className="font-bold text-white text-sm tracking-wide">{activeApp.name}</span>
             <div className="flex items-center gap-1.5 text-[10px] font-mono text-[#888]">
               <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 shadow-[0_0_5px_#10b981]" />
-              <span className="text-emerald-400">UNDETECTED</span>
+              <span className="text-emerald-400">{activeApp.status?.toUpperCase() || 'UNDETECTED'}</span>
               <span className="mx-1">•</span>
-              <span>{cs2App.version || 'v2.1.4'}</span>
+              <span>{latestVersion}</span>
             </div>
           </div>
         </div>
@@ -168,7 +170,7 @@ export const LauncherRedesign: React.FC<LauncherRedesignProps> = ({
         
         <button
           onClick={() => {
-            if (cs2App) onLaunch(cs2App);
+            if (activeApp) onLaunch(activeApp);
           }}
           className="flex items-center gap-2 bg-[#ff8c00] hover:bg-[#ffa02b] text-black font-extrabold text-xs tracking-wider uppercase py-2.5 px-7 rounded-full shadow-[0_0_15px_rgba(255,140,0,0.15)] transition-all active:scale-95"
         >

@@ -7,15 +7,16 @@
 #include <mutex>
 #include <algorithm>
 #include "loader.hpp"
+#include "orionerror.h"
 #include <http2client/http2client_easy.h>
 
 #ifdef _DEBUG
 #define LAUNCHER_BASE_URL "http://localhost:3000"
 #else
-#define LAUNCHER_BASE_URL "http://launcher.weave.su"
+#define LAUNCHER_BASE_URL "https://launcher.weave.su"
 #endif
 
-#define CDN_URL "http://cdn.weave.su"
+#define CDN_URL "https://cdn.weave.su"
 
 namespace loader {
 
@@ -24,6 +25,7 @@ static std::string g_stage_name = "Ready";
 static int g_stage_progress = 0;
 static bool g_is_finished = false;
 static bool g_was_successful = false;
+static OrionError g_last_error = ORION_ERROR_NONE;
 
 void set_stage(const std::string &name, int progress) {
   std::lock_guard<std::mutex> lock(g_stage_mutex);
@@ -56,6 +58,18 @@ bool was_successful() {
   return g_was_successful;
 }
 
+int get_error_code() {
+  std::lock_guard<std::mutex> lock(g_stage_mutex);
+  return static_cast<int>(g_last_error);
+}
+
+std::string get_error_string() {
+  std::lock_guard<std::mutex> lock(g_stage_mutex);
+  if (g_last_error == ORION_ERROR_NONE)
+    return {};
+  return OrionErrorToString(g_last_error);
+}
+
 static void WINAPI report_loader_stage(const char *name, int progress) {
   // Bootstrap occupies 0-45%; loader.dll owns the remaining 55%.
   progress = (std::max)(0, (std::min)(100, progress));
@@ -68,6 +82,21 @@ static void WINAPI report_loader_finished(BOOL success) {
   g_is_finished = true;
   if (g_was_successful)
     g_stage_progress = 100;
+}
+
+// Records an OrionError code (must be called without holding g_stage_mutex).
+static void set_error(OrionError err) {
+  std::lock_guard<std::mutex> lock(g_stage_mutex);
+  g_last_error = err;
+}
+
+// Convenience: set error code, update the stage label, and mark as failed.
+static void fail_with_error(OrionError err, const std::string &stage_msg) {
+  set_error(err);
+  set_stage(stage_msg + " [" + std::to_string(static_cast<int>(err)) + ": " +
+                OrionErrorToString(err) + "]",
+            0);
+  report_loader_finished(FALSE);
 }
 
 struct ManualMappingData {
@@ -225,6 +254,7 @@ bool fetch_and_inject(const std::string &app_id, const std::string &token) {
     std::lock_guard<std::mutex> lock(g_stage_mutex);
     g_is_finished = false;
     g_was_successful = false;
+    g_last_error = ORION_ERROR_NONE;
   }
   set_stage("Connecting to CDN...", 5);
   Sleep(400);
@@ -237,8 +267,7 @@ bool fetch_and_inject(const std::string &app_id, const std::string &token) {
 
   auto resp = client.Get("/loader.dll");
   if (!resp.ok() || resp.body.empty()) {
-    set_stage("Download failed", 0);
-    report_loader_finished(FALSE);
+    fail_with_error(ORION_ERROR_DOWNLOAD_MODULE_1, "Download failed");
     return false;
   }
 
@@ -247,23 +276,20 @@ bool fetch_and_inject(const std::string &app_id, const std::string &token) {
 
   std::vector<BYTE> dllData(resp.body.begin(), resp.body.end());
   if (dllData.size() < sizeof(IMAGE_DOS_HEADER)) {
-    set_stage("Invalid PE file size", 0);
-    report_loader_finished(FALSE);
+    fail_with_error(ORION_ERROR_INVALID_MODULE_1, "Invalid PE file size");
     return false;
   }
 
   IMAGE_DOS_HEADER *pDos = reinterpret_cast<IMAGE_DOS_HEADER *>(dllData.data());
   if (pDos->e_magic != IMAGE_DOS_SIGNATURE) {
-    set_stage("Invalid DOS signature", 0);
-    report_loader_finished(FALSE);
+    fail_with_error(ORION_ERROR_INVALID_MODULE_1, "Invalid DOS signature");
     return false;
   }
 
   IMAGE_NT_HEADERS *pNt =
       reinterpret_cast<IMAGE_NT_HEADERS *>(dllData.data() + pDos->e_lfanew);
   if (pNt->Signature != IMAGE_NT_SIGNATURE) {
-    set_stage("Invalid NT signature", 0);
-    report_loader_finished(FALSE);
+    fail_with_error(ORION_ERROR_INVALID_MODULE_2, "Invalid NT signature");
     return false;
   }
 
@@ -274,23 +300,13 @@ bool fetch_and_inject(const std::string &app_id, const std::string &token) {
   set_stage("Loading bootstrap module...", 33);
   Sleep(350);
 
-  std::string targetProc = app_id + ".exe";
-  if (app_id == "cs2" || app_id == "6a943ac671805d202d5fc1e0")
-    targetProc = "cs2.exe";
-  else if (app_id == "rust")
-    targetProc = "RustClient.exe";
-
-  DWORD pid = FindTargetPid(targetProc);
-  if (pid == 0)
-    pid = GetCurrentProcessId();
-
   bool bSuccess = false;
-  set_stage("Opening launcher process...", 35);
+  set_stage("Preparing bootstrap environment...", 35);
   Sleep(300);
 
-  HANDLE hProc = OpenProcess(PROCESS_ALL_ACCESS, FALSE, pid);
-  if (!hProc)
-    hProc = GetCurrentProcess();
+  // We always inject the loader.dll bootstrap into our own launcher process.
+  // The loaded Orion module handles finding/launching the actual game process.
+  HANDLE hProc = GetCurrentProcess();
 
   if (hProc) {
     set_stage("Allocating bootstrap memory...", 37);
@@ -364,19 +380,16 @@ bool fetch_and_inject(const std::string &app_id, const std::string &token) {
         bSuccess = true;
         set_stage("Bootstrap started...", 45);
       } else {
-        set_stage("CreateRemoteThread failed", 0);
-        report_loader_finished(FALSE);
+        fail_with_error(ORION_ERROR_CREATE_THREAD_1, "CreateRemoteThread failed");
       }
     } else {
-      set_stage("VirtualAllocEx failed in launcher", 0);
-      report_loader_finished(FALSE);
+      fail_with_error(ORION_ERROR_ALLOCATE_MEMORY_1, "VirtualAllocEx failed in launcher");
     }
 
     if (hProc != GetCurrentProcess())
       CloseHandle(hProc);
   } else {
-    set_stage("OpenProcess failed for launcher PID", 0);
-    report_loader_finished(FALSE);
+    fail_with_error(ORION_ERROR_OPEN_PROCESS_TOKEN_1, "OpenProcess failed for launcher PID");
   }
 
   return bSuccess;

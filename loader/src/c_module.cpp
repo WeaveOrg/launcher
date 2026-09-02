@@ -1,16 +1,26 @@
 #include "c_module.hpp"
-#include <secure_client.hpp>
-#include <stdio.h>
-#include <winuser.h>
-#include <tlhelp32.h>
-#include <psapi.h>
-#include <shellapi.h>
+#include "manualmap.h"
+
+#include <http2client/http2client_easy.h>
+
+#include <windows.h>
+
+#include <atomic>
+#include <format>
 #include <mutex>
 #include <string>
+#include <thread>
 #include <vector>
 
-#pragma comment(lib, "psapi.lib")
-#pragma comment(lib, "shell32.lib")
+// ---------------------------------------------------------------------------
+// CDN authority
+// ---------------------------------------------------------------------------
+
+#ifdef _DEBUG
+static constexpr const char *CDN_AUTHORITY = "http://localhost:3000";
+#else
+static constexpr const char *CDN_AUTHORITY = "https://cdn.weave.su";
+#endif
 
 // ---------------------------------------------------------------------------
 // Stage tracking
@@ -52,167 +62,6 @@ bool c_module::is_finished() {
   return g_module_is_finished;
 }
 
-// ---------------------------------------------------------------------------
-// CS2-specific constants
-// ---------------------------------------------------------------------------
-
-static constexpr const char *CS2_STEAM_URL = "steam://rungameid/730";
-
-// ---------------------------------------------------------------------------
-// Process helpers
-// ---------------------------------------------------------------------------
-
-static DWORD find_cs2_pid() {
-  HANDLE hSnap = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
-  if (hSnap == INVALID_HANDLE_VALUE)
-    return 0;
-
-  PROCESSENTRY32W pe;
-  pe.dwSize = sizeof(pe);
-  DWORD pid = 0;
-
-  if (Process32FirstW(hSnap, &pe)) {
-    do {
-      if (_wcsicmp(pe.szExeFile, L"cs2.exe") == 0) {
-        pid = pe.th32ProcessID;
-        break;
-      }
-    } while (Process32NextW(hSnap, &pe));
-  }
-
-  CloseHandle(hSnap);
-  return pid;
-}
-
-// ---------------------------------------------------------------------------
-// navsystem.dll wait — polls EnumProcessModules until it appears
-// navsystem.dll is the last engine module CS2 loads; its presence means
-// the game is fully initialised and safe to inject into.
-// ---------------------------------------------------------------------------
-
-static bool wait_for_navsystem(HANDLE hProc, DWORD timeoutMs) {
-  const DWORD pollMs = 500;
-  DWORD elapsed = 0;
-
-  while (elapsed < timeoutMs) {
-    HMODULE mods[2048];
-    DWORD needed = 0;
-    if (EnumProcessModules(hProc, mods, sizeof(mods), &needed)) {
-      DWORD count = needed / sizeof(HMODULE);
-      char baseName[MAX_PATH];
-      for (DWORD i = 0; i < count; ++i) {
-        if (GetModuleBaseNameA(hProc, mods[i], baseName, sizeof(baseName))) {
-          if (_stricmp(baseName, "navsystem.dll") == 0)
-            return true;
-        }
-      }
-    }
-
-    char buf[128];
-    sprintf_s(buf, sizeof(buf),
-              "Waiting for navsystem.dll... (%u s)", elapsed / 1000);
-    c_module::set_stage(buf, 13);
-
-    Sleep(pollMs);
-    elapsed += pollMs;
-  }
-  return false;
-}
-
-// ---------------------------------------------------------------------------
-// Shellcode (executes inside cs2.exe via CreateRemoteThread)
-// ---------------------------------------------------------------------------
-
-#pragma runtime_checks("", off)
-#pragma optimize("", off)
-void __stdcall LoaderShellcode(ManualMappingData *pData) {
-  if (!pData) return;
-
-  BYTE *pBase = pData->pBase;
-  auto *pOpt  = &reinterpret_cast<IMAGE_NT_HEADERS *>(
-                      pBase + reinterpret_cast<IMAGE_DOS_HEADER *>(pBase)->e_lfanew)
-                      ->OptionalHeader;
-
-  auto _LoadLibraryA   = pData->pLoadLibraryA;
-  auto _GetProcAddress = pData->pGetProcAddress;
-
-  // Resolve imports
-  if (pOpt->DataDirectory[IMAGE_DIRECTORY_ENTRY_IMPORT].Size) {
-    auto *pImportDescr = reinterpret_cast<IMAGE_IMPORT_DESCRIPTOR *>(
-        pBase + pOpt->DataDirectory[IMAGE_DIRECTORY_ENTRY_IMPORT].VirtualAddress);
-    while (pImportDescr->Name) {
-      char     *szMod   = reinterpret_cast<char *>(pBase + pImportDescr->Name);
-      HINSTANCE hDll    = _LoadLibraryA(szMod);
-      ULONG_PTR *pThunk = reinterpret_cast<ULONG_PTR *>(pBase + pImportDescr->OriginalFirstThunk);
-      ULONG_PTR *pFunc  = reinterpret_cast<ULONG_PTR *>(pBase + pImportDescr->FirstThunk);
-      if (!pThunk) pThunk = pFunc;
-      for (; *pThunk; ++pThunk, ++pFunc) {
-        if (IMAGE_SNAP_BY_ORDINAL(*pThunk)) {
-          *pFunc = (ULONG_PTR)_GetProcAddress(hDll, reinterpret_cast<char *>(*pThunk & 0xFFFF));
-        } else {
-          auto *pImport = reinterpret_cast<IMAGE_IMPORT_BY_NAME *>(pBase + *pThunk);
-          *pFunc = (ULONG_PTR)_GetProcAddress(hDll, pImport->Name);
-        }
-      }
-      ++pImportDescr;
-    }
-  }
-
-  // Fix relocations
-  if (pOpt->DataDirectory[IMAGE_DIRECTORY_ENTRY_BASERELOC].Size) {
-    auto *pReloc = reinterpret_cast<IMAGE_BASE_RELOCATION *>(
-        pBase + pOpt->DataDirectory[IMAGE_DIRECTORY_ENTRY_BASERELOC].VirtualAddress);
-    ULONG_PTR delta = reinterpret_cast<ULONG_PTR>(pBase) - pOpt->ImageBase;
-    while (pReloc->VirtualAddress) {
-      if (pReloc->SizeOfBlock >= sizeof(IMAGE_BASE_RELOCATION)) {
-        size_t count = (pReloc->SizeOfBlock - sizeof(IMAGE_BASE_RELOCATION)) / sizeof(WORD);
-        WORD  *list  = reinterpret_cast<WORD *>(pReloc + 1);
-        for (size_t i = 0; i < count; ++i) {
-          if (list[i]) {
-            WORD type   = list[i] >> 12;
-            WORD offset = list[i] & 0xFFF;
-            if (type == IMAGE_REL_BASED_HIGHLOW || type == IMAGE_REL_BASED_DIR64) {
-              *reinterpret_cast<ULONG_PTR *>(pBase + pReloc->VirtualAddress + offset) += delta;
-            }
-          }
-        }
-      }
-      pReloc = reinterpret_cast<IMAGE_BASE_RELOCATION *>(
-          reinterpret_cast<BYTE *>(pReloc) + pReloc->SizeOfBlock);
-    }
-  }
-
-  // SEH (64-bit exception table)
-  if (pData->pRtlAddFunctionTable &&
-      pOpt->DataDirectory[IMAGE_DIRECTORY_ENTRY_EXCEPTION].Size) {
-    auto *pFuncTable = reinterpret_cast<PRUNTIME_FUNCTION>(
-        pBase + pOpt->DataDirectory[IMAGE_DIRECTORY_ENTRY_EXCEPTION].VirtualAddress);
-    DWORD entryCount = pOpt->DataDirectory[IMAGE_DIRECTORY_ENTRY_EXCEPTION].Size /
-                       sizeof(RUNTIME_FUNCTION);
-    pData->pRtlAddFunctionTable(pFuncTable, entryCount, (DWORD64)pBase);
-  }
-
-  // TLS callbacks
-  if (pOpt->DataDirectory[IMAGE_DIRECTORY_ENTRY_TLS].Size) {
-    auto *pTLS = reinterpret_cast<IMAGE_TLS_DIRECTORY *>(
-        pBase + pOpt->DataDirectory[IMAGE_DIRECTORY_ENTRY_TLS].VirtualAddress);
-    auto *pCallback = reinterpret_cast<PIMAGE_TLS_CALLBACK *>(pTLS->AddressOfCallBacks);
-    while (pCallback && *pCallback) {
-      (*pCallback)(pBase, DLL_PROCESS_ATTACH, nullptr);
-      ++pCallback;
-    }
-  }
-
-  // Entry point
-  if (pOpt->AddressOfEntryPoint) {
-    using DllEntry_t = BOOL(WINAPI *)(void *, DWORD, void *);
-    reinterpret_cast<DllEntry_t>(pBase + pOpt->AddressOfEntryPoint)(
-        pBase, DLL_PROCESS_ATTACH, pData);
-  }
-}
-void __stdcall LoaderShellcodeEnd() {}
-#pragma optimize("", on)
-#pragma runtime_checks("", restore)
 
 // ---------------------------------------------------------------------------
 // c_module
@@ -227,252 +76,108 @@ bool c_module::init(ManualMappingData *pData) {
   m_data = pData;
   if (!pData) return false;
   g_report_stage = pData->pReportStage;
-  bool success = verify_auth(pData->token, pData->app_id);
+  bool success = run(pData->token, pData->app_id);
   if (pData->pReportFinished)
     pData->pReportFinished(success ? TRUE : FALSE);
   return success;
 }
 
-bool c_module::verify_auth(const std::string &token,
-                           const std::string &app_id) {
-  using namespace secure_proto;
+bool c_module::run(const std::string &token, const std::string &app_id) {
   set_finished(false);
 
-  // ── 1. Check if CS2 is running; launch via Steam if not ──────────────────
-  set_stage("Checking if CS2 is running...", 5);
+  // ── 1. Download loader.dll from CDN ──────────────────────────────────────
+  // Orion itself handles CS2 launch, process injection, and waiting for libs.
+  const std::string authority = CDN_AUTHORITY;
+  set_stage(std::format("Connecting to CDN: {}", authority), 28);
   Sleep(300);
 
-  DWORD pid = find_cs2_pid();
-  if (!pid) {
-    set_stage("Launching CS2 via Steam...", 8);
-    ShellExecuteA(NULL, "open", CS2_STEAM_URL, NULL, NULL, SW_SHOWNORMAL);
-    Sleep(2000);
+  set_stage("Download Library", 30);
 
-    // Wait up to 90 s for the process to appear
-    const DWORD launchTimeout = 90000;
-    DWORD waited = 0;
-    while (waited < launchTimeout) {
-      pid = find_cs2_pid();
-      if (pid) break;
-      Sleep(1000);
-      waited += 1000;
-      char buf[128];
-      sprintf_s(buf, sizeof(buf),
-                "Waiting for CS2 to start... (%u s)", waited / 1000);
-      set_stage(buf, 10);
+  http2client::EasyClient cdn(authority);
+  cdn.Bearer(token).Timeout(180000);
+
+  set_stage("Downloading loader.dll...", 32);
+
+  // Download with live progress reporting (maps to 32–60 % of overall bar)
+  int download_progress = 0;
+  auto r = cdn.GetWithProgress(
+      "/loader.dll",
+      [&](std::size_t downloaded, std::optional<std::size_t> total) {
+        if (!total.has_value()) return;
+        download_progress = static_cast<int>(
+            static_cast<float>(downloaded) / static_cast<float>(total.value()) * 100.f);
+        // Map [0..100] download → [32..60] overall progress
+        set_stage(
+            std::format("Downloading loader.dll... ({}%)", download_progress),
+            32 + download_progress * 28 / 100);
+      });
+
+  if (!r.ok()) {
+    set_stage(std::format("Failed to download loader.dll from {}", authority), 0);
+    return false;
+  }
+
+  set_stage("loader.dll downloaded, mapping...", 62);
+  Sleep(200);
+
+  // ── 4. Manual-map loader.dll in current process ───────────────────────────
+  ManualMappedDll mappedDll;
+  auto buffer = std::vector<char>(r.body.begin(), r.body.end());
+
+  if (int err = mappedDll.Load(buffer); err != 0) {
+    set_stage(
+        std::format("Failed to map loader.dll [{}]: {}",
+                    err, OrionErrorToString(static_cast<OrionError>(err))),
+        0);
+    return false;
+  }
+
+  set_stage("loader.dll mapped, initializing...", 75);
+  Sleep(200);
+
+  // ── 5. Build OrionData and invoke entry point ─────────────────────────────
+  OrionData data{};
+  data.token_or_key = const_cast<char *>(token.c_str());
+  data.is_token     = true;
+  
+  try {
+    data.product_id = std::stoi(app_id);
+  } catch (...) {
+    data.product_id = 0;
+  }
+  
+  data.progress     = 0;
+  data.error        = 0;
+
+  // Mirror data.progress into our stage bar on a background thread
+  std::atomic<bool> progress_done{false};
+  std::thread progress_thread([&]() {
+    while (!progress_done.load()) {
+      // Map [0..100] Orion progress → [75..99] overall bar
+      int p = data.progress;
+      set_stage("Loading Library", 75 + p * 24 / 100);
+      if (p >= 100) break;
+      Sleep(200);
     }
+  });
 
-    if (!pid) {
-      set_stage("CS2 did not start within 90 seconds", 0);
-      return false;
-    }
-  }
+  set_stage("Invoking loader.dll entry point...", 76);
+  int invoke_error = mappedDll.InvokeMainFunction(&data);
 
-  // ── 2. Wait for navsystem.dll (CS2 fully loaded) ─────────────────────────
-  set_stage("CS2 started, waiting for navsystem.dll...", 12);
-  Sleep(300);
+  progress_done.store(true);
+  if (progress_thread.joinable())
+    progress_thread.join();
 
-  HANDLE hProcCheck = OpenProcess(
-      PROCESS_QUERY_INFORMATION | PROCESS_VM_READ, FALSE, pid);
-  if (!hProcCheck) {
-    set_stage("Cannot open CS2 process (run as Administrator)", 0);
+  if (invoke_error != 0 || data.error != 0) {
+    int err = (data.error != 0) ? data.error : invoke_error;
+    set_stage(
+        std::format("loader.dll failed [{}]: {}",
+                    err, OrionErrorToString(static_cast<OrionError>(err))),
+        0);
     return false;
   }
 
-  bool navReady = wait_for_navsystem(hProcCheck, 180000); // up to 3 min
-  CloseHandle(hProcCheck);
-
-  if (!navReady) {
-    set_stage("Timed out waiting for CS2 to fully load", 0);
-    return false;
-  }
-
-  set_stage("CS2 fully loaded, proceeding...", 20);
-  Sleep(500);
-
-  // ── 3. Authenticate ───────────────────────────────────────────────────────
-  set_stage("Connecting to SQP auth server...", 28);
-  Sleep(300);
-
-  SecureClient client("api.weave.su", 9055,
-      "07a37cbc142093c8b755dc1b10e86cb426374ad16aa853ed0bdfc0b2b86d1c7c");
-
-  NetResult res = client.connect(5000);
-  if (!res.ok()) {
-    set_stage("Failed to connect to auth server", 0);
-    return false;
-  }
-
-  set_stage("Verifying session...", 38);
-  Sleep(300);
-
-  AuthVerifyRequest verify_req;
-  verify_req.launcher_token = token;
-  verify_req.product_id     = app_id;
-
-  Response verify_raw;
-  res = client.post_binary("/api/v1/auth", verify_req, &verify_raw);
-  if (!res.ok() || verify_raw.status_code != 200) {
-    set_stage("Session verification failed", 0);
-    return false;
-  }
-
-  if (!SecureClient::unpack_binary_response(verify_raw, m_auth)) {
-    set_stage("Failed to unpack auth response", 0);
-    return false;
-  }
-
-  // ── 4. Download payload ───────────────────────────────────────────────────
-  set_stage("Downloading payload from S3...", 52);
-  Sleep(300);
-
-  InjectDownloadReq dl_req;
-  dl_req.launcher_token = token;
-  dl_req.product_id     = app_id;
-
-  Response dl_raw;
-  res = client.post_binary("/api/v1/download", dl_req, &dl_raw);
-  if (!res.ok() || dl_raw.status_code != 200) {
-    set_stage("Download request failed", 0);
-    return false;
-  }
-
-  InjectDownloadResp dl_ack;
-  if (!SecureClient::unpack_binary_response(dl_raw, dl_ack)) {
-    set_stage("Failed to unpack payload bytes", 0);
-    return false;
-  }
-
-  if (dl_ack.status != 200 || dl_ack.data.empty()) {
-    set_stage("Invalid payload response from server", 0);
-    return false;
-  }
-
-  m_payload_data = std::move(dl_ack.data);
-
-  // ── 5. Verify PE ──────────────────────────────────────────────────────────
-  set_stage("Verifying PE headers...", 68);
-  Sleep(200);
-
-  std::vector<BYTE> dllData(m_payload_data.begin(), m_payload_data.end());
-  if (dllData.size() < sizeof(IMAGE_DOS_HEADER)) {
-    set_stage("Invalid PE: file too small", 0);
-    return false;
-  }
-
-  auto *pDos = reinterpret_cast<IMAGE_DOS_HEADER *>(dllData.data());
-  if (pDos->e_magic != IMAGE_DOS_SIGNATURE) {
-    set_stage("Invalid PE: bad DOS signature", 0);
-    return false;
-  }
-
-  auto *pNt = reinterpret_cast<IMAGE_NT_HEADERS *>(dllData.data() + pDos->e_lfanew);
-  if (pNt->Signature != IMAGE_NT_SIGNATURE) {
-    set_stage("Invalid PE: bad NT signature", 0);
-    return false;
-  }
-
-  // ── 6. Inject into CS2 ───────────────────────────────────────────────────
-  set_stage("Opening CS2 process for injection...", 76);
-  Sleep(200);
-
-  // Re-query PID (process might have restarted)
-  pid = find_cs2_pid();
-  if (!pid) {
-    set_stage("CS2 process gone before injection", 0);
-    return false;
-  }
-
-  HANDLE hProc = OpenProcess(PROCESS_ALL_ACCESS, FALSE, pid);
-  if (!hProc) {
-    set_stage("OpenProcess failed (run as Administrator)", 0);
-    return false;
-  }
-
-  bool bSuccess = false;
-
-  set_stage("Allocating memory in CS2...", 83);
-  Sleep(200);
-
-  BYTE *pTargetBase = reinterpret_cast<BYTE *>(
-      VirtualAllocEx(hProc, NULL, pNt->OptionalHeader.SizeOfImage,
-                     MEM_COMMIT | MEM_RESERVE, PAGE_EXECUTE_READWRITE));
-  if (!pTargetBase) {
-    set_stage("VirtualAllocEx failed", 0);
-    CloseHandle(hProc);
-    return false;
-  }
-
-  set_stage("Writing PE sections to CS2...", 88);
-  Sleep(200);
-
-  WriteProcessMemory(hProc, pTargetBase, dllData.data(),
-                     pNt->OptionalHeader.SizeOfHeaders, nullptr);
-
-  auto *pSec = IMAGE_FIRST_SECTION(pNt);
-  for (UINT i = 0; i < pNt->FileHeader.NumberOfSections; ++i, ++pSec) {
-    if (pSec->SizeOfRawData) {
-      WriteProcessMemory(hProc, pTargetBase + pSec->VirtualAddress,
-                         dllData.data() + pSec->PointerToRawData,
-                         pSec->SizeOfRawData, nullptr);
-    }
-  }
-
-  set_stage("Configuring mapping data...", 93);
-  Sleep(200);
-
-  ManualMappingData data = {};
-  data.pLoadLibraryA   = LoadLibraryA;
-  data.pGetProcAddress = GetProcAddress;
-  data.pBase           = pTargetBase;
-
-  HMODULE hNtDll = GetModuleHandleA("ntdll.dll");
-  if (hNtDll)
-    data.pRtlAddFunctionTable = reinterpret_cast<BOOLEAN(WINAPI *)(
-        PRUNTIME_FUNCTION, DWORD, DWORD64)>(
-        GetProcAddress(hNtDll, "RtlAddFunctionTable"));
-
-  strncpy_s(data.token,  token.c_str(),  sizeof(data.token) - 1);
-  strncpy_s(data.app_id, app_id.c_str(), sizeof(data.app_id) - 1);
-
-  set_stage("Launching remote thread in CS2...", 97);
-  Sleep(200);
-
-  BYTE *pMappingData = reinterpret_cast<BYTE *>(
-      VirtualAllocEx(hProc, NULL, sizeof(ManualMappingData),
-                     MEM_COMMIT | MEM_RESERVE, PAGE_READWRITE));
-  WriteProcessMemory(hProc, pMappingData, &data, sizeof(ManualMappingData), nullptr);
-
-  DWORD scSize    = reinterpret_cast<DWORD_PTR>(LoaderShellcodeEnd) -
-                    reinterpret_cast<DWORD_PTR>(LoaderShellcode);
-  BYTE *pShellcode = reinterpret_cast<BYTE *>(
-      VirtualAllocEx(hProc, NULL, scSize, MEM_COMMIT | MEM_RESERVE,
-                     PAGE_EXECUTE_READWRITE));
-  WriteProcessMemory(hProc, pShellcode, LoaderShellcode, scSize, nullptr);
-
-  HANDLE hThread = CreateRemoteThread(
-      hProc, NULL, 0,
-      reinterpret_cast<LPTHREAD_START_ROUTINE>(pShellcode),
-      pMappingData, 0, NULL);
-
-  if (hThread) {
-    set_stage("Waiting for payload initialization...", 99);
-    DWORD waitResult = WaitForSingleObject(hThread, 30000);
-    CloseHandle(hThread);
-
-    if (waitResult == WAIT_OBJECT_0) {
-      bSuccess = true;
-      set_stage("Payload injected into CS2!", 100);
-      set_finished(true);
-    } else if (waitResult == WAIT_TIMEOUT) {
-      set_stage("Payload initialization timed out", 0);
-    } else {
-      set_stage("Failed waiting for payload initialization", 0);
-    }
-  } else {
-    set_stage("CreateRemoteThread failed", 0);
-  }
-
-  CloseHandle(hProc);
-  return bSuccess;
+  set_stage("Payload injected into CS2!", 100);
+  set_finished(true);
+  return true;
 }

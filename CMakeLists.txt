@@ -12,6 +12,7 @@ include_directories(
     include
     ${CMAKE_CURRENT_SOURCE_DIR}/webview2_pkg/build/native/include
     ${CMAKE_CURRENT_SOURCE_DIR}/thirdparty/http2client/release/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/loader/src
 )
 
 # Source files

@@ -81,7 +81,9 @@ declare global {
   }
 }
 
-const BACKEND_URL = process.env.NEXT_PUBLIC_BACKEND_URL || 'http://localhost:4000';
+const BACKEND_URL = typeof window !== 'undefined'
+  ? window.location.origin
+  : (process.env.NEXT_PUBLIC_BACKEND_URL || 'http://localhost:3000');
 
 class WeaveIPCBridge {
   private ws: WebSocket | null = null;
@@ -200,54 +202,21 @@ class WeaveIPCBridge {
     }
   }
 
-  // Fetch Catalog Apps
+  // Fetch Catalog Apps (Products)
   public async getApps(): Promise<AppItem[]> {
     try {
-      const res = await fetch(`${BACKEND_URL}/api/v1/apps`);
+      const token = typeof window !== 'undefined' ? localStorage.getItem('launcher_token') || '' : '';
+      const res = await fetch(`${BACKEND_URL}/api/v1/products?token=${encodeURIComponent(token)}`);
       const data = await res.json();
-      if (data.success && data.apps) {
-        return data.apps;
+      
+      const productsList = data.products || data.apps;
+      if (data.success && productsList) {
+        return productsList;
       }
     } catch (e) {
-      console.warn('Failed to fetch apps from backend, using fallback catalog');
+      console.warn('Failed to fetch products from backend');
     }
-
-    return [
-      {
-        id: 'cs2',
-        name: 'Counter-Strike 2',
-        subtitle: 'Next-Gen Kernel & Cloud Injection Suite',
-        category: 'FPS / Competitive',
-        status: 'Undetected',
-        statusColor: '#10b981',
-        version: 'v3.4.1',
-        lastUpdate: '2026-08-28',
-        processName: 'cs2.exe',
-        banner: 'https://images.unsplash.com/photo-1542751371-adc38448a05e?w=800&auto=format&fit=crop&q=80',
-        icon: 'Crosshair',
-        rating: 4.95,
-        activeUsers: 1420,
-        features: ['Kernel Driver Loader', 'Dynamic Stream Overlay', 'Memory Integrity Guard', 'Cloud Profile Sync'],
-        description: 'Ultra-low latency kernel injection driver with fully customized UI overlays and cloud profile synchronization.'
-      },
-      {
-        id: 'rust',
-        name: 'Rust Experimental',
-        subtitle: 'Advanced Asset & Automation Loader',
-        category: 'Survival / MMO',
-        status: 'Undetected',
-        statusColor: '#10b981',
-        version: 'v2.8.0',
-        lastUpdate: '2026-08-26',
-        processName: 'RustClient.exe',
-        banner: 'https://images.unsplash.com/photo-1518709268805-4e9042af9f23?w=800&auto=format&fit=crop&q=80',
-        icon: 'Flame',
-        rating: 4.88,
-        activeUsers: 840,
-        features: ['EAC Bypass Layer', 'Recoil Compensator DSP', 'Asset Scanner', 'Silent Loot Tracker'],
-        description: 'High performance native automation layer with EAC safety sandboxing and fast memory mapping.'
-      }
-    ];
+    return [];
   }
 
   // Fetch News Feed

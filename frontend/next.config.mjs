@@ -19,6 +19,18 @@ const nextConfig = {
       },
     ];
   },
+  async rewrites() {
+    return [
+      {
+        source: '/api/:path*',
+        destination: 'http://backend:4000/api/:path*', // Proxy API requests
+      },
+      {
+        source: '/ws',
+        destination: 'http://backend:4000/ws', // Proxy WebSocket connections
+      },
+    ];
+  },
 };
 
 export default nextConfig;

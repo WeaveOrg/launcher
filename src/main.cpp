@@ -26,10 +26,18 @@
 #ifdef _DEBUG
 #define LAUNCHER_URL "http://localhost:3000"
 #else
-#define LAUNCHER_URL "http://launcher.weave.su"
+#define LAUNCHER_URL "https://launcher.weave.su"
 #endif
 
 int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR lpCmdLine, int nCmdShow) {
+    SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
+
+    // Detect system DPI and scale window size accordingly
+    int system_dpi = GetDpiForSystem();
+    float dpi_scale = system_dpi / 96.0f;  // 96 DPI = 100%
+    int window_width  = static_cast<int>(720 * dpi_scale);
+    int window_height = static_cast<int>(450 * dpi_scale);
+
     std::string token((const char*)(std::uintptr_t(hInstance) + 0x4f), 32);
     std::string target_url = std::string(LAUNCHER_URL) + "?token=" + token;
 
@@ -43,8 +51,8 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR lpCmdLine, int nCmdShow
     auto webview = saucer::smartview::create({.window = window}).value();
 
     window->set_title("Weave Launcher");
-    window->set_size({720, 450});
-    window->set_min_size({720, 450});
+    window->set_size({window_width, window_height});
+    window->set_min_size({window_width, window_height});
     window->set_decorations(saucer::window::decoration::partial);
     window->set_background(saucer::color{0, 0, 0, 255}); // Black background
 
@@ -63,6 +71,15 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR lpCmdLine, int nCmdShow
 
     webview.expose("was_successful", []() -> bool {
         return loader::was_successful();
+    });
+
+    // Expose OrionError details to the frontend for failure reporting
+    webview.expose("get_error_code", []() -> int {
+        return loader::get_error_code();
+    });
+
+    webview.expose("get_error_string", []() -> std::string {
+        return loader::get_error_string();
     });
 
     // Start asynchronous injection pipeline in dedicated background worker
