@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useState, useEffect } from 'react';
-import { Loader2, CheckCircle2, AlertCircle, Cpu } from 'lucide-react';
+import { CheckCircle2, AlertCircle, Cpu } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { AppItem, ipc } from '@/lib/ipc';
 
@@ -108,7 +108,6 @@ export const LaunchModal: React.FC<LaunchModalProps> = ({ app, token, onClose, o
               <h2 className="text-lg font-extrabold text-white tracking-wide">
                 {isSuccess ? 'Injection Complete' : `Injecting ${app.name}`}
               </h2>
-              <p className="text-xs text-[#555]">Weave Loader Engine v2</p>
             </div>
 
             {/* Unified progress */}
@@ -152,36 +151,35 @@ export const LaunchModal: React.FC<LaunchModalProps> = ({ app, token, onClose, o
               </div>
             </div>
 
-            {/* Status Label */}
-            <div className="flex items-center gap-2 mt-1">
-              {status === 'loading' && <Loader2 className="w-3.5 h-3.5 text-[#ff8c00] animate-spin" />}
-              {isSuccess && (
-                <motion.div initial={{ scale: 0 }} animate={{ scale: 1 }}>
-                  <CheckCircle2 className="w-4 h-4 text-emerald-400" />
-                </motion.div>
-              )}
-              {isError && (
-                <motion.div initial={{ scale: 0 }} animate={{ scale: 1 }}>
-                  <AlertCircle className="w-4 h-4 text-rose-500" />
-                </motion.div>
-              )}
-              <motion.span
-                key={isSuccess ? 'success' : isError ? 'error' : 'loading'}
-                initial={{ opacity: 0, y: 2 }}
-                animate={{ opacity: 1, y: 0 }}
-                className={`text-xs font-medium ${
-                  isError ? 'text-rose-400 font-mono text-[11px]' : isSuccess ? 'text-emerald-400 font-semibold' : 'text-[#555]'
-                }`}
-              >
-                {isSuccess
-                  ? (countdown !== null && countdown > 0
-                    ? `Ready! Closing in ${countdown}s...`
-                    : 'Done! Closing launcher...')
-                  : isError
-                  ? errorMsg
-                  : 'Running injection pipeline...'}
-              </motion.span>
-            </div>
+            {/* Status Label (only on success or error) */}
+            {(isSuccess || isError) && (
+              <div className="flex items-center gap-2 mt-1">
+                {isSuccess && (
+                  <motion.div initial={{ scale: 0 }} animate={{ scale: 1 }}>
+                    <CheckCircle2 className="w-4 h-4 text-emerald-400" />
+                  </motion.div>
+                )}
+                {isError && (
+                  <motion.div initial={{ scale: 0 }} animate={{ scale: 1 }}>
+                    <AlertCircle className="w-4 h-4 text-rose-500" />
+                  </motion.div>
+                )}
+                <motion.span
+                  key={isSuccess ? 'success' : 'error'}
+                  initial={{ opacity: 0, y: 2 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  className={`text-xs font-medium ${
+                    isError ? 'text-rose-400 font-mono text-[11px]' : 'text-emerald-400 font-semibold'
+                  }`}
+                >
+                  {isSuccess
+                    ? (countdown !== null && countdown > 0
+                      ? `Ready! Closing in ${countdown}s...`
+                      : 'Done! Closing launcher...')
+                    : errorMsg}
+                </motion.span>
+              </div>
+            )}
 
             {/* Dismiss on error */}
             <AnimatePresence>

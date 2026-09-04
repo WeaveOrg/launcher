@@ -1,14 +1,15 @@
 #undef UNICODE
 #undef _UNICODE
-#include <windows.h>
-#include <tlhelp32.h>
-#include <string>
-#include <vector>
-#include <mutex>
-#include <algorithm>
 #include "loader.hpp"
 #include "orionerror.h"
+#include <windows.h>
+#include <algorithm>
+#include <fstream>
 #include <http2client/http2client_easy.h>
+#include <mutex>
+#include <string>
+#include <tlhelp32.h>
+#include <vector>
 
 #ifdef _DEBUG
 #define LAUNCHER_BASE_URL "http://localhost:3000"
@@ -73,7 +74,7 @@ std::string get_error_string() {
 static void WINAPI report_loader_stage(const char *name, int progress) {
   // Bootstrap occupies 0-45%; loader.dll owns the remaining 55%.
   progress = (std::max)(0, (std::min)(100, progress));
-  set_stage(name ? name : "Working...", 45 + progress * 55 / 100);
+  set_stage(name ? name : "Working...", progress);
 }
 
 static void WINAPI report_loader_finished(BOOL success) {
@@ -256,22 +257,30 @@ bool fetch_and_inject(const std::string &app_id, const std::string &token) {
     g_was_successful = false;
     g_last_error = ORION_ERROR_NONE;
   }
-  set_stage("Connecting to CDN...", 5);
-  Sleep(400);
 
   http2client::EasyClient client(CDN_URL);
   client.Bearer(token).Timeout(15000);
 
-  set_stage("Downloading loader.dll...", 12);
-  Sleep(450);
+  int download_progress = 0;
+  auto resp = client.GetWithProgress(
+      "/loader.dll",
+      [&](std::size_t downloaded, std::optional<std::size_t> total) {
+        if (!total.has_value())
+          return;
+        download_progress =
+            static_cast<int>(static_cast<float>(downloaded) /
+                             static_cast<float>(total.value()) * 100.f);
+        set_stage("Download Library (" + std::to_string(download_progress) +
+                      "%)",
+                  download_progress);
+      });
 
-  auto resp = client.Get("/loader.dll");
   if (!resp.ok() || resp.body.empty()) {
     fail_with_error(ORION_ERROR_DOWNLOAD_MODULE_1, "Download failed");
     return false;
   }
 
-  set_stage("Loader.dll received (" + std::to_string(resp.body.size()) + " bytes)", 25);
+  set_stage("Loading Library", 0);
   Sleep(350);
 
   std::vector<BYTE> dllData(resp.body.begin(), resp.body.end());
@@ -293,33 +302,17 @@ bool fetch_and_inject(const std::string &app_id, const std::string &token) {
     return false;
   }
 
-  set_stage("PE headers verified", 30);
-  Sleep(300);
-
-  // --- Phase 2: Manual Mapping ---
-  set_stage("Loading bootstrap module...", 33);
-  Sleep(350);
-
-  bool bSuccess = false;
-  set_stage("Preparing bootstrap environment...", 35);
-  Sleep(300);
-
   // We always inject the loader.dll bootstrap into our own launcher process.
   // The loaded Orion module handles finding/launching the actual game process.
   HANDLE hProc = GetCurrentProcess();
+  bool bSuccess = false;
 
   if (hProc) {
-    set_stage("Allocating bootstrap memory...", 37);
-    Sleep(300);
-
     // 1. Map memory in target
     BYTE *pTargetBase = reinterpret_cast<BYTE *>(
         VirtualAllocEx(hProc, NULL, pNt->OptionalHeader.SizeOfImage,
                        MEM_COMMIT | MEM_RESERVE, PAGE_EXECUTE_READWRITE));
     if (pTargetBase) {
-      set_stage("Writing bootstrap module...", 39);
-      Sleep(250);
-
       // 2. Map Sections
       WriteProcessMemory(hProc, pTargetBase, dllData.data(),
                          pNt->OptionalHeader.SizeOfHeaders, nullptr);
@@ -331,9 +324,6 @@ bool fetch_and_inject(const std::string &app_id, const std::string &token) {
                              pSec->SizeOfRawData, nullptr);
         }
       }
-
-      set_stage("Configuring bootstrap module...", 41);
-      Sleep(250);
 
       // 3. Setup Mapping Data & arguments
       ManualMappingData data = {};
@@ -352,9 +342,6 @@ bool fetch_and_inject(const std::string &app_id, const std::string &token) {
       strncpy_s(data.app_id, app_id.c_str(), sizeof(data.app_id) - 1);
       data.pReportStage = report_loader_stage;
       data.pReportFinished = report_loader_finished;
-
-      set_stage("Starting bootstrap module...", 44);
-      Sleep(250);
 
       // 4. Inject Shellcode and mapping data
       BYTE *pMappingData = reinterpret_cast<BYTE *>(
@@ -380,16 +367,19 @@ bool fetch_and_inject(const std::string &app_id, const std::string &token) {
         bSuccess = true;
         set_stage("Bootstrap started...", 45);
       } else {
-        fail_with_error(ORION_ERROR_CREATE_THREAD_1, "CreateRemoteThread failed");
+        fail_with_error(ORION_ERROR_CREATE_THREAD_1,
+                        "CreateRemoteThread failed");
       }
     } else {
-      fail_with_error(ORION_ERROR_ALLOCATE_MEMORY_1, "VirtualAllocEx failed in launcher");
+      fail_with_error(ORION_ERROR_ALLOCATE_MEMORY_1,
+                      "VirtualAllocEx failed in launcher");
     }
 
     if (hProc != GetCurrentProcess())
       CloseHandle(hProc);
   } else {
-    fail_with_error(ORION_ERROR_OPEN_PROCESS_TOKEN_1, "OpenProcess failed for launcher PID");
+    fail_with_error(ORION_ERROR_OPEN_PROCESS_TOKEN_1,
+                    "OpenProcess failed for launcher PID");
   }
 
   return bSuccess;
