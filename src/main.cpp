@@ -10,6 +10,7 @@
 #include <stdio.h>
 #include <string>
 #include <algorithm>
+#include <filesystem>
 #include <future>
 #include <thread>
 #include "WebView2.h"
@@ -55,6 +56,23 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR lpCmdLine, int nCmdShow
     window->set_min_size({window_width, window_height});
     window->set_decorations(saucer::window::decoration::partial);
     window->set_background(saucer::color{0, 0, 0, 255}); // Black background
+
+    // Set window icon immediately from the bundled app.ico so it's visible
+    // right at startup, instead of waiting for the webview to load the page
+    // and report its favicon.
+    {
+        wchar_t exe_path[MAX_PATH];
+        GetModuleFileNameW(nullptr, exe_path, MAX_PATH);
+        std::filesystem::path icon_path = std::filesystem::path(exe_path).parent_path() / "app.ico";
+        if (auto icon = saucer::icon::from(icon_path); icon.has_value()) {
+            window->set_icon(icon.value());
+        }
+    }
+
+    // Fall back to the site's live favicon if it ever changes.
+    webview.on<saucer::webview::event::favicon>([window](const saucer::icon &icon) {
+        window->set_icon(icon);
+    });
 
     // Expose stage state (std::string and int) to frontend
     webview.expose("get_stage_name", []() -> std::string {

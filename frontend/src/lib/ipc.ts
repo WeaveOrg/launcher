@@ -335,9 +335,10 @@ class WeaveIPCBridge {
 
           if (isFinished) {
             if (!succeeded) {
+              const errDetail = await saucer.call<string>('get_error_string', []).catch(() => '');
               return {
                 success: false,
-                message: String(stage || 'Loader initialization failed.')
+                message: String(errDetail || stage || 'Loader initialization failed.')
               };
             }
             return {

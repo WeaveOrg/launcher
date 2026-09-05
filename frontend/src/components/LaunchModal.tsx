@@ -143,24 +143,26 @@ export const LaunchModal: React.FC<LaunchModalProps> = ({ app, token, onClose, o
                   initial={{ opacity: 0, y: 1 }}
                   animate={{ opacity: 1, y: 0 }}
                   className={`text-[10px] font-mono text-left truncate ${
-                    isError ? 'text-rose-400' : phase.progress === 100 ? 'text-emerald-400' : 'text-[#555]'
+                    isError ? 'text-rose-400 font-medium' : phase.progress === 100 ? 'text-emerald-400' : 'text-[#555]'
                   }`}
                 >
-                  {phase.stage}
+                  {isError ? 'Injection stopped due to an error' : phase.stage}
                 </motion.p>
               </div>
             </div>
 
             {/* Status Label (only on success or error) */}
             {(isSuccess || isError) && (
-              <div className="flex items-center gap-2 mt-1">
+              <div className={`w-full flex items-start gap-2.5 mt-1 px-3 py-2.5 rounded-xl text-left ${
+                isError ? 'bg-rose-500/10 border border-rose-500/20' : 'bg-emerald-500/10 border border-emerald-500/20'
+              }`}>
                 {isSuccess && (
-                  <motion.div initial={{ scale: 0 }} animate={{ scale: 1 }}>
+                  <motion.div initial={{ scale: 0 }} animate={{ scale: 1 }} className="shrink-0 mt-0.5">
                     <CheckCircle2 className="w-4 h-4 text-emerald-400" />
                   </motion.div>
                 )}
                 {isError && (
-                  <motion.div initial={{ scale: 0 }} animate={{ scale: 1 }}>
+                  <motion.div initial={{ scale: 0 }} animate={{ scale: 1 }} className="shrink-0 mt-0.5">
                     <AlertCircle className="w-4 h-4 text-rose-500" />
                   </motion.div>
                 )}
@@ -168,7 +170,7 @@ export const LaunchModal: React.FC<LaunchModalProps> = ({ app, token, onClose, o
                   key={isSuccess ? 'success' : 'error'}
                   initial={{ opacity: 0, y: 2 }}
                   animate={{ opacity: 1, y: 0 }}
-                  className={`text-xs font-medium ${
+                  className={`text-xs font-medium break-words leading-relaxed select-text ${
                     isError ? 'text-rose-400 font-mono text-[11px]' : 'text-emerald-400 font-semibold'
                   }`}
                 >

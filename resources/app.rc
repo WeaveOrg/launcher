@@ -1,0 +1,4 @@
+// Embeds the app icon into the executable so Explorer/taskbar show it
+// immediately, without waiting for the webview to load and report a favicon.
+// Windows uses the icon with the lowest numeric resource ID as the exe icon.
+1 ICON "app.ico"

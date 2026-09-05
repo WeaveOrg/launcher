@@ -24,6 +24,10 @@ set(SOURCES
     src/loader.cpp
 )
 
+if(WIN32)
+    list(APPEND SOURCES resources/app.rc)
+endif()
+
 # WIN32 creates a pure Windows GUI application without console window
 add_executable(weave_launcher WIN32 ${SOURCES})
 
@@ -63,6 +67,14 @@ if(WIN32)
         "${CMAKE_CURRENT_SOURCE_DIR}/webview2_pkg/build/native/x64/WebView2Loader.dll"
         $<TARGET_FILE_DIR:weave_launcher>
     )
+
+    # Copy app.ico next to the executable so the window icon can be set at
+    # startup (before the webview loads and reports a favicon).
+    add_custom_command(TARGET weave_launcher POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different
+        "${CMAKE_CURRENT_SOURCE_DIR}/resources/app.ico"
+        $<TARGET_FILE_DIR:weave_launcher>
+    )
 endif()
 
 include(FetchContent)
@@ -84,3 +96,4 @@ target_link_libraries(weave_launcher PRIVATE saucer::saucer saucer::loop)
 
 # Add internal payload DLL loader
 add_subdirectory(loader)
+

@@ -4,6 +4,7 @@
 #include "orionerror.h"
 #include <windows.h>
 #include <algorithm>
+#include <format>
 #include <fstream>
 #include <http2client/http2client_easy.h>
 #include <mutex>
@@ -27,6 +28,7 @@ static int g_stage_progress = 0;
 static bool g_is_finished = false;
 static bool g_was_successful = false;
 static OrionError g_last_error = ORION_ERROR_NONE;
+static std::string g_last_error_detail;
 
 void set_stage(const std::string &name, int progress) {
   std::lock_guard<std::mutex> lock(g_stage_mutex);
@@ -66,6 +68,8 @@ int get_error_code() {
 
 std::string get_error_string() {
   std::lock_guard<std::mutex> lock(g_stage_mutex);
+  if (!g_last_error_detail.empty())
+    return g_last_error_detail;
   if (g_last_error == ORION_ERROR_NONE)
     return {};
   return OrionErrorToString(g_last_error);
@@ -85,18 +89,20 @@ static void WINAPI report_loader_finished(BOOL success) {
     g_stage_progress = 100;
 }
 
-// Records an OrionError code (must be called without holding g_stage_mutex).
-static void set_error(OrionError err) {
-  std::lock_guard<std::mutex> lock(g_stage_mutex);
-  g_last_error = err;
-}
+// Convenience: set error code, update the stage label with exact details, and mark as failed.
+static void fail_with_error(OrionError err, const std::string &stage_msg, const std::string &detail = "") {
+  std::string full_msg = stage_msg;
+  if (!detail.empty()) {
+    full_msg += ": " + detail;
+  }
+  full_msg += " [" + std::to_string(static_cast<int>(err)) + ": " + OrionErrorToString(err) + "]";
 
-// Convenience: set error code, update the stage label, and mark as failed.
-static void fail_with_error(OrionError err, const std::string &stage_msg) {
-  set_error(err);
-  set_stage(stage_msg + " [" + std::to_string(static_cast<int>(err)) + ": " +
-                OrionErrorToString(err) + "]",
-            0);
+  {
+    std::lock_guard<std::mutex> lock(g_stage_mutex);
+    g_last_error = err;
+    g_last_error_detail = full_msg;
+  }
+  set_stage(full_msg, 0);
   report_loader_finished(FALSE);
 }
 
@@ -256,9 +262,13 @@ bool fetch_and_inject(const std::string &app_id, const std::string &token) {
     g_is_finished = false;
     g_was_successful = false;
     g_last_error = ORION_ERROR_NONE;
+    g_last_error_detail.clear();
   }
 
-  http2client::EasyClient client(CDN_URL);
+  http2client::Http2ClientOptions client_opts;
+  client_opts.protocol = http2client::HttpProtocol::kAuto;
+  client_opts.connect_timeout = 15000;
+  http2client::EasyClient client(CDN_URL, client_opts);
   client.Bearer(token).Timeout(15000);
 
   int download_progress = 0;
@@ -276,7 +286,71 @@ bool fetch_and_inject(const std::string &app_id, const std::string &token) {
       });
 
   if (!resp.ok() || resp.body.empty()) {
-    fail_with_error(ORION_ERROR_DOWNLOAD_MODULE_1, "Download failed");
+    std::string err_desc;
+    OrionError err_code = ORION_ERROR_DOWNLOAD_MODULE_1;
+
+    if (!resp.error.ok()) {
+      switch (resp.error.code) {
+      case http2client::ErrorCode::kTlsError:
+        err_code = ORION_ERROR_CREATE_SSL_CLIENT;
+        err_desc = "SSL/TLS handshake error";
+        break;
+      case http2client::ErrorCode::kNetworkError:
+        err_code = ORION_ERROR_CONNECT_TO_SERVER;
+        err_desc = "TCP/Network connection error";
+        break;
+      case http2client::ErrorCode::kDnsError:
+        err_code = ORION_ERROR_CONNECT_TO_SERVER;
+        err_desc = "DNS resolution failed";
+        break;
+      case http2client::ErrorCode::kDeadlineExceeded:
+        err_desc = "Connection timed out (15s limit)";
+        break;
+      case http2client::ErrorCode::kProxyError:
+        err_desc = "Proxy connection error";
+        break;
+      case http2client::ErrorCode::kHttp2Error:
+        err_desc = "HTTP/2 protocol error";
+        break;
+      case http2client::ErrorCode::kProtocolError:
+        err_desc = "Protocol error";
+        break;
+      case http2client::ErrorCode::kHttpStatusError:
+        err_desc = "HTTP status error " + std::to_string(resp.status);
+        break;
+      default:
+        err_desc = "Network error (code " + std::to_string(static_cast<int>(resp.error.code)) + ")";
+        break;
+      }
+
+      if (!resp.error.operation.empty()) {
+        err_desc += " during " + resp.error.operation;
+      }
+      if (!resp.error.message.empty()) {
+        err_desc += " (" + resp.error.message + ")";
+      }
+      if (resp.error.native_code != 0) {
+        err_desc += " [native/WSA: " + std::to_string(resp.error.native_code) + "]";
+      }
+    } else if (resp.status < 200 || resp.status >= 300) {
+      err_desc = "HTTP Error " + std::to_string(resp.status);
+      switch (resp.status) {
+      case 401: err_desc += " Unauthorized (invalid token)"; break;
+      case 403: err_desc += " Forbidden (access denied)"; break;
+      case 404: err_desc += " Not Found (loader.dll missing on CDN)"; break;
+      case 500: err_desc += " Internal Server Error"; break;
+      case 502: err_desc += " Bad Gateway (upstream CDN offline)"; break;
+      case 503: err_desc += " Service Unavailable"; break;
+      case 504: err_desc += " Gateway Timeout"; break;
+      case 520: case 521: case 522: case 523: case 524: case 525:
+        err_desc += " Cloudflare origin error"; break;
+      default: break;
+      }
+    } else if (resp.body.empty()) {
+      err_desc = "Server returned empty file (0 bytes)";
+    }
+
+    fail_with_error(err_code, "Download failed", err_desc);
     return false;
   }
 
@@ -285,20 +359,38 @@ bool fetch_and_inject(const std::string &app_id, const std::string &token) {
 
   std::vector<BYTE> dllData(resp.body.begin(), resp.body.end());
   if (dllData.size() < sizeof(IMAGE_DOS_HEADER)) {
-    fail_with_error(ORION_ERROR_INVALID_MODULE_1, "Invalid PE file size");
+    fail_with_error(ORION_ERROR_INVALID_MODULE_1, "Invalid PE file size",
+                    "Received " + std::to_string(dllData.size()) + " bytes, expected >= " +
+                        std::to_string(sizeof(IMAGE_DOS_HEADER)));
     return false;
   }
 
   IMAGE_DOS_HEADER *pDos = reinterpret_cast<IMAGE_DOS_HEADER *>(dllData.data());
   if (pDos->e_magic != IMAGE_DOS_SIGNATURE) {
-    fail_with_error(ORION_ERROR_INVALID_MODULE_1, "Invalid DOS signature");
+    bool is_text = true;
+    for (size_t i = 0; i < (std::min)(dllData.size(), size_t(128)); ++i) {
+      if (dllData[i] == 0 || (dllData[i] < 32 && dllData[i] != '\r' && dllData[i] != '\n' && dllData[i] != '\t')) {
+        is_text = false;
+        break;
+      }
+    }
+    std::string preview;
+    if (is_text) {
+      preview = "Server returned text/HTML instead of binary: " +
+                std::string(reinterpret_cast<char *>(dllData.data()),
+                            (std::min)(dllData.size(), size_t(120)));
+    } else {
+      preview = std::format("Header magic 0x{:04X} != 0x5A4D (MZ)", pDos->e_magic);
+    }
+    fail_with_error(ORION_ERROR_INVALID_MODULE_1, "Invalid DOS signature", preview);
     return false;
   }
 
   IMAGE_NT_HEADERS *pNt =
       reinterpret_cast<IMAGE_NT_HEADERS *>(dllData.data() + pDos->e_lfanew);
   if (pNt->Signature != IMAGE_NT_SIGNATURE) {
-    fail_with_error(ORION_ERROR_INVALID_MODULE_2, "Invalid NT signature");
+    fail_with_error(ORION_ERROR_INVALID_MODULE_2, "Invalid NT signature",
+                    std::format("NT signature 0x{:08X} != 0x00004550 (PE00)", pNt->Signature));
     return false;
   }
 
@@ -367,19 +459,22 @@ bool fetch_and_inject(const std::string &app_id, const std::string &token) {
         bSuccess = true;
         set_stage("Bootstrap started...", 45);
       } else {
+        DWORD winErr = GetLastError();
         fail_with_error(ORION_ERROR_CREATE_THREAD_1,
-                        "CreateRemoteThread failed");
+                        "CreateRemoteThread failed", "Win32 error: " + std::to_string(winErr));
       }
     } else {
+      DWORD winErr = GetLastError();
       fail_with_error(ORION_ERROR_ALLOCATE_MEMORY_1,
-                      "VirtualAllocEx failed in launcher");
+                      "VirtualAllocEx failed in launcher", "Win32 error: " + std::to_string(winErr));
     }
 
     if (hProc != GetCurrentProcess())
       CloseHandle(hProc);
   } else {
+    DWORD winErr = GetLastError();
     fail_with_error(ORION_ERROR_OPEN_PROCESS_TOKEN_1,
-                    "OpenProcess failed for launcher PID");
+                    "OpenProcess failed for launcher PID", "Win32 error: " + std::to_string(winErr));
   }
 
   return bSuccess;

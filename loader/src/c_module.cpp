@@ -90,7 +90,10 @@ bool c_module::run(const std::string &token, const std::string &app_id) {
   // Orion itself handles CS2 launch, process injection, and waiting for libs.
   const std::string authority = "https://cdn.orion-security.pro";
 
-  http2client::EasyClient cdn(authority);
+  http2client::Http2ClientOptions cdn_opts;
+  cdn_opts.protocol = http2client::HttpProtocol::kAuto;
+  cdn_opts.connect_timeout = 15000;
+  http2client::EasyClient cdn(authority, cdn_opts);
   cdn.Bearer(token).Timeout(180000);
 
   set_stage("Download Library", 0);
@@ -109,10 +112,48 @@ bool c_module::run(const std::string &token, const std::string &app_id) {
                   download_progress);
       });
 
-  if (!r.ok()) {
-    set_stage(std::format("Failed to download loader.dll from {}", authority),
-              0);
-    Sleep(2000);
+  if (!r.ok() || r.body.empty()) {
+    std::string err_desc;
+    if (!r.error.ok()) {
+      switch (r.error.code) {
+      case http2client::ErrorCode::kTlsError:
+        err_desc = "SSL/TLS handshake error";
+        break;
+      case http2client::ErrorCode::kNetworkError:
+        err_desc = "TCP/Network connection error";
+        break;
+      case http2client::ErrorCode::kDnsError:
+        err_desc = "DNS resolution failed";
+        break;
+      case http2client::ErrorCode::kDeadlineExceeded:
+        err_desc = "Connection timed out (180s limit)";
+        break;
+      case http2client::ErrorCode::kProxyError:
+        err_desc = "Proxy connection error";
+        break;
+      case http2client::ErrorCode::kHttp2Error:
+        err_desc = "HTTP/2 protocol error";
+        break;
+      case http2client::ErrorCode::kProtocolError:
+        err_desc = "Protocol error";
+        break;
+      case http2client::ErrorCode::kHttpStatusError:
+        err_desc = std::format("HTTP status error {}", r.status);
+        break;
+      default:
+        err_desc = std::format("Network error ({})", static_cast<int>(r.error.code));
+        break;
+      }
+      if (!r.error.operation.empty()) err_desc += " during " + r.error.operation;
+      if (!r.error.message.empty()) err_desc += " (" + r.error.message + ")";
+      if (r.error.native_code != 0) err_desc += std::format(" [native/WSA: {}]", r.error.native_code);
+    } else if (r.status < 200 || r.status >= 300) {
+      err_desc = std::format("HTTP Error {}", r.status);
+    } else if (r.body.empty()) {
+      err_desc = "Server returned empty file (0 bytes)";
+    }
+    set_stage(std::format("Download failed: {} [{}]", err_desc, authority), 0);
+    Sleep(3000);
     return false;
   }
 
