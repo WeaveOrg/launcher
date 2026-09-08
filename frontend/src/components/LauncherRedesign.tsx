@@ -13,6 +13,7 @@ interface LauncherRedesignProps {
   ping: number;
   onLaunch: (app: AppItem) => void;
   onLogout: () => void;
+  onChannelChanged?: (channel: 'stable' | 'beta') => void | Promise<void>;
 }
 
 export const LauncherRedesign: React.FC<LauncherRedesignProps> = ({
@@ -21,7 +22,8 @@ export const LauncherRedesign: React.FC<LauncherRedesignProps> = ({
   token,
   changelogs,
   onLaunch,
-  onLogout
+  onLogout,
+  onChannelChanged
 }) => {
   const safeApps = Array.isArray(apps) ? apps : [];
   const safeChangelogs = Array.isArray(changelogs) ? changelogs : [];
@@ -40,7 +42,13 @@ export const LauncherRedesign: React.FC<LauncherRedesignProps> = ({
     const prev = channel;
     setChannel(next); // optimistic
     const ok = await ipc.setChannel(next, token);
-    if (!ok) setChannel(prev); // revert on failure
+    if (!ok) {
+      setChannel(prev); // revert on failure
+    } else {
+      // Refresh the product list so the id injected on the next Launch matches
+      // the new channel; without this Launch would still use the stale id.
+      await onChannelChanged?.(next);
+    }
     setSwitching(false);
   };
 

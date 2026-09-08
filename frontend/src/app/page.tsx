@@ -36,17 +36,26 @@ function MainLauncherContent() {
     }
 
     // Fetch apps
+    await refreshApps();
+  };
+
+  // Re-fetch the product list. The ids it returns are channel-aware (the
+  // backend hands beta accounts the beta build's id), so this must run after
+  // the channel changes — otherwise Launch would inject the stale stable id.
+  const refreshApps = async () => {
     try {
       const fetchedApps = await ipc.getApps();
-      if (Array.isArray(fetchedApps)) {
-        setApps(fetchedApps);
-      } else {
-        setApps([]);
-      }
+      setApps(Array.isArray(fetchedApps) ? fetchedApps : []);
     } catch (e) {
       console.warn('Could not load apps list', e);
       setApps([]);
     }
+  };
+
+  // Called by the launcher's channel toggle once the switch is persisted.
+  const handleChannelChanged = async (channel: 'stable' | 'beta') => {
+    setUser((prev) => (prev ? { ...prev, channel } : prev));
+    await refreshApps();
   };
 
   const handleLogout = () => {
@@ -77,6 +86,7 @@ function MainLauncherContent() {
         ping={16}
         onLaunch={(app) => setActiveLaunchApp(app)}
         onLogout={handleLogout}
+        onChannelChanged={handleChannelChanged}
       />
 
       <LaunchModal
