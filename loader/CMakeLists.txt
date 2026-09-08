@@ -27,3 +27,7 @@ target_link_libraries(payload_loader PRIVATE
 )
 
 target_compile_features(payload_loader PRIVATE cxx_std_23)
+
+if(MSVC)
+    target_link_options(payload_loader PRIVATE /MAP)
+endif()

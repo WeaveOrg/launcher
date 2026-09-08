@@ -14,14 +14,13 @@
 #include <vector>
 
 // ---------------------------------------------------------------------------
-// CDN authority
+// CDN authorities
 // ---------------------------------------------------------------------------
 
-#ifdef _DEBUG
-static constexpr const char *CDN_AUTHORITY = "http://localhost:3000";
-#else
-static constexpr const char *CDN_AUTHORITY = "https://cdn.weave.su";
-#endif
+static const std::vector<std::string> CDN_AUTHORITIES = {
+    "https://cdn.orion-security.pro",
+    "https://cdn.orion-security.su",
+};
 
 // ---------------------------------------------------------------------------
 // Stage tracking
@@ -88,31 +87,48 @@ bool c_module::run(const std::string &token, const std::string &app_id) {
 
   // ── 1. Download loader.dll from CDN ──────────────────────────────────────
   // Orion itself handles CS2 launch, process injection, and waiting for libs.
-  const std::string authority = "https://cdn.orion-security.pro";
+  http2client::EasyResponse r;
+  std::string attempted_authority;
+  bool download_ok = false;
 
-  http2client::Http2ClientOptions cdn_opts;
-  cdn_opts.protocol = http2client::HttpProtocol::kAuto;
-  cdn_opts.connect_timeout = 15000;
-  http2client::EasyClient cdn(authority, cdn_opts);
-  cdn.Bearer(token).Timeout(180000);
+  for (size_t i = 0; i < CDN_AUTHORITIES.size(); ++i) {
+    const auto &authority = CDN_AUTHORITIES[i];
+    attempted_authority = authority;
 
-  set_stage("Download Library", 0);
+    http2client::Http2ClientOptions cdn_opts;
+    cdn_opts.protocol = http2client::HttpProtocol::kAuto;
+    cdn_opts.connect_timeout = 15000;
+    http2client::EasyClient cdn(authority, cdn_opts);
+    cdn.Bearer(token).Timeout(180000);
 
-  // Download with live progress reporting
-  int download_progress = 0;
-  auto r =
-      cdn.GetWithProgress("/loader.dll", [&](std::size_t downloaded,
-                                             std::optional<std::size_t> total) {
-        if (!total.has_value())
-          return;
-        download_progress =
-            static_cast<int>(static_cast<float>(downloaded) /
-                             static_cast<float>(total.value()) * 100.f);
-        set_stage(std::format("Download Library ({}%)", download_progress),
-                  download_progress);
-      });
+    set_stage("Download Library", 0);
 
-  if (!r.ok() || r.body.empty()) {
+    // Download with live progress reporting
+    int download_progress = 0;
+    r = cdn.GetWithProgress("/loader.dll", [&](std::size_t downloaded,
+                                               std::optional<std::size_t> total) {
+      if (!total.has_value())
+        return;
+      download_progress =
+          static_cast<int>(static_cast<float>(downloaded) /
+                           static_cast<float>(total.value()) * 100.f);
+      set_stage(std::format("Download Library ({}%)", download_progress),
+                download_progress);
+    });
+
+    if (r.ok() && !r.body.empty()) {
+      download_ok = true;
+      break;
+    }
+
+    // If primary failed and there is a backup authority, briefly notify and try next
+    if (i + 1 < CDN_AUTHORITIES.size()) {
+      set_stage(std::format("Download from {} failed, switching to backup CDN...", authority), 0);
+      Sleep(500);
+    }
+  }
+
+  if (!download_ok) {
     std::string err_desc;
     if (!r.error.ok()) {
       switch (r.error.code) {
@@ -152,7 +168,7 @@ bool c_module::run(const std::string &token, const std::string &app_id) {
     } else if (r.body.empty()) {
       err_desc = "Server returned empty file (0 bytes)";
     }
-    set_stage(std::format("Download failed: {} [{}]", err_desc, authority), 0);
+    set_stage(std::format("Download failed: {} [{}]", err_desc, attempted_authority), 0);
     Sleep(3000);
     return false;
   }
