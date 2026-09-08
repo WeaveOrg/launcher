@@ -1,6 +1,6 @@
 'use client';
 
-import React from 'react';
+import React, { useState } from 'react';
 import { ipc, AppItem, LauncherProfile, ChangelogItem } from '../lib/ipc';
 import { Play, Minus, X, CheckCircle2, User, Sparkles } from 'lucide-react';
 
@@ -25,6 +25,24 @@ export const LauncherRedesign: React.FC<LauncherRedesignProps> = ({
 }) => {
   const safeApps = Array.isArray(apps) ? apps : [];
   const safeChangelogs = Array.isArray(changelogs) ? changelogs : [];
+
+  // Release channel. The toggle is only rendered when the account holds beta
+  // access; the switch persists server-side and takes effect on the next launch
+  // (the loader reads its product id at start).
+  const [channel, setChannel] = useState<'stable' | 'beta'>(
+    user.channel === 'beta' ? 'beta' : 'stable'
+  );
+  const [switching, setSwitching] = useState(false);
+
+  const changeChannel = async (next: 'stable' | 'beta') => {
+    if (next === channel || switching) return;
+    setSwitching(true);
+    const prev = channel;
+    setChannel(next); // optimistic
+    const ok = await ipc.setChannel(next, token);
+    if (!ok) setChannel(prev); // revert on failure
+    setSwitching(false);
+  };
 
   // Get the first available app from the backend, or default fallback if backend is empty
   const activeApp = safeApps.length > 0 ? safeApps[0] : ({
@@ -163,11 +181,38 @@ export const LauncherRedesign: React.FC<LauncherRedesignProps> = ({
 
       {/* BOTTOM ACTION BAR */}
       <footer className="h-20 bg-[#121212] border-t border-[#222] flex items-center justify-between px-8">
-        <div className="flex flex-col">
-          <span className="text-sm font-bold text-[#ccc]">Ready to inject</span>
-          <span className="text-[11px] font-mono text-[#666]">Authorized as {user.username} (ID: {user.id.substring(0, 8)}...)</span>
+        <div className="flex items-center gap-5">
+          <div className="flex flex-col">
+            <span className="text-sm font-bold text-[#ccc]">Ready to inject</span>
+            <span className="text-[11px] font-mono text-[#666]">Authorized as {user.username} (ID: {user.id.substring(0, 8)}...)</span>
+          </div>
+
+          {/* Release channel toggle — shown only when the account has beta access */}
+          {user.beta_access && (
+            <div className="flex flex-col gap-1 no-drag">
+              <span className="text-[9px] uppercase font-mono tracking-wider text-[#555]">Channel</span>
+              <div className="flex items-center rounded-full bg-[#181818] border border-[#2a2a2a] p-0.5">
+                {(['stable', 'beta'] as const).map((ch) => (
+                  <button
+                    key={ch}
+                    onClick={() => changeChannel(ch)}
+                    disabled={switching}
+                    className={`px-3 py-1 rounded-full text-[10px] font-bold uppercase tracking-wide transition disabled:opacity-50 ${
+                      channel === ch
+                        ? ch === 'beta'
+                          ? 'bg-[#ff8c00] text-black shadow-[0_0_10px_rgba(255,140,0,0.25)]'
+                          : 'bg-[#2a2a2a] text-white'
+                        : 'text-[#888] hover:text-white'
+                    }`}
+                  >
+                    {ch}
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
         </div>
-        
+
         <button
           onClick={() => {
             if (activeApp) onLaunch(activeApp);

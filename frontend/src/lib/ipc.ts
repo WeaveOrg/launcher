@@ -53,6 +53,10 @@ export interface LauncherProfile {
   id: string;
   username: string;
   avatar: string;
+  // Release channel the account launches on, and whether the beta channel is
+  // unlocked for this account. The channel toggle is only shown when beta_access.
+  channel?: 'stable' | 'beta';
+  beta_access?: boolean;
 }
 
 export interface ChangelogItem {
@@ -261,6 +265,28 @@ class WeaveIPCBridge {
       console.warn('Failed to fetch launcher profile via proxy', e);
     }
     return null;
+  }
+
+  // Proxy API: switch release channel (stable/beta). The backend refuses beta
+  // unless the account holds beta access; the new channel applies at the next
+  // launch, since the loader reads its product id at start.
+  public async setChannel(channel: 'stable' | 'beta', token?: string): Promise<boolean> {
+    const launcherToken = token || (typeof window !== 'undefined' ? localStorage.getItem('launcher_token') || '' : '');
+    try {
+      const query = launcherToken ? `?token=${encodeURIComponent(launcherToken)}` : '';
+      const res = await fetch(`/api/launcher/channel${query}`, {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-Launcher-Token': launcherToken,
+        },
+        body: JSON.stringify({ channel }),
+      });
+      return res.ok;
+    } catch (e) {
+      console.warn('Failed to set channel via proxy', e);
+      return false;
+    }
   }
 
   // Proxy API: Get Changelogs
