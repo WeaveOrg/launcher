@@ -342,9 +342,8 @@ class WeaveIPCBridge {
         saucer.call('fetch_and_inject', [app.id, authToken]).catch(() => {});
       }
 
-      // CS2 startup and module initialization can legitimately take minutes.
-      const deadline = Date.now() + 5 * 60 * 1000;
-      while (Date.now() < deadline) {
+      // Wait indefinitely until the native loader reports finished or failure.
+      while (true) {
         try {
           const [stage, progress, isFinished, succeeded] = await Promise.all([
             saucer.call<string>('get_stage_name', []).catch(() => 'Connecting...'),
@@ -376,11 +375,6 @@ class WeaveIPCBridge {
 
         await new Promise((r) => setTimeout(r, 100));
       }
-
-      return {
-        success: false,
-        message: 'Injection timeout: target process did not respond.'
-      };
     } catch (err: any) {
       console.warn('Native injection error', err);
       return {
