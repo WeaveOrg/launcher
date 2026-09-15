@@ -7,6 +7,7 @@
 #include <windows.h>
 #include <dwmapi.h>
 #include <shlobj.h>
+#include <shellapi.h>
 #include <stdio.h>
 #include <string>
 #include <algorithm>
@@ -24,11 +25,7 @@
 #include <saucer/modules/loop.hpp>
 #include <saucer/window.hpp>
 
-#ifdef _DEBUG
-#define LAUNCHER_URL "http://localhost:3000"
-#else
 #define LAUNCHER_URL "https://launcher.weave.su"
-#endif
 
 int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR lpCmdLine, int nCmdShow) {
     SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
@@ -98,6 +95,20 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR lpCmdLine, int nCmdShow
 
     webview.expose("get_error_string", []() -> std::string {
         return loader::get_error_string();
+    });
+
+    // The stale-launcher screen can only open this fixed first-party URL.
+    // ShellExecuteW delegates it to the user's default browser.
+    webview.expose("open_dashboard", []() -> bool {
+        const auto result = ShellExecuteW(
+            nullptr,
+            L"open",
+            L"https://weave.su/dashboard/products",
+            nullptr,
+            nullptr,
+            SW_SHOWNORMAL
+        );
+        return reinterpret_cast<INT_PTR>(result) > 32;
     });
 
     // Start asynchronous injection pipeline in dedicated background worker

@@ -160,6 +160,17 @@ class WeaveIPCBridge {
     });
   }
 
+  // Opens the fixed dashboard URL through ShellExecuteW in the native launcher.
+  public async openDashboard(): Promise<boolean> {
+    try {
+      const saucer = await import('@saucer-dev/types');
+      return Boolean(await saucer.call<boolean>('open_dashboard', []));
+    } catch (error) {
+      console.warn('Failed to open dashboard in the default browser', error);
+      return false;
+    }
+  }
+
   // HWID and System Spec retrieval
   public async getSystemSpecs(): Promise<SystemSpecs> {
     if (window.weaveNative?.getSystemInfo) {

@@ -7,6 +7,7 @@ add_library(payload_loader SHARED
 set(HTTP2CLIENT_ROOT "${CMAKE_SOURCE_DIR}/thirdparty/http2client")
 
 target_include_directories(payload_loader PRIVATE
+    ${CMAKE_SOURCE_DIR}/include
     ${CMAKE_CURRENT_SOURCE_DIR}/src
     $<$<CONFIG:Debug>:${HTTP2CLIENT_ROOT}/debug/include>
     $<$<NOT:$<CONFIG:Debug>>:${HTTP2CLIENT_ROOT}/release/include>

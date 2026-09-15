@@ -83,12 +83,7 @@ function MainLauncherContent() {
   }
 
   if (user.launcher_update_required) {
-    return (
-      <LegacyLauncherNotice
-        latestVersion={user.latest_launcher_version}
-        downloadedVersion={user.launcher_downloaded_version}
-      />
-    );
+    return <LegacyLauncherNotice />;
   }
 
   return (

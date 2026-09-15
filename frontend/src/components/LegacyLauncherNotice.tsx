@@ -1,60 +1,98 @@
 'use client';
 
-import { AlertTriangle, Download, ExternalLink } from 'lucide-react';
+import { useState } from 'react';
+import { ArrowUpRight, CircleAlert, Minus, X } from 'lucide-react';
+import { ipc } from '@/lib/ipc';
 
-const dashboardUrl = 'https://weave.su/dashboard/products';
+export function LegacyLauncherNotice() {
+  const [openingDashboard, setOpeningDashboard] = useState(false);
+  const [openFailed, setOpenFailed] = useState(false);
 
-interface LegacyLauncherNoticeProps {
-  latestVersion?: string;
-  downloadedVersion?: string;
-}
+  const openDashboard = async () => {
+    if (openingDashboard) return;
 
-export function LegacyLauncherNotice({ latestVersion, downloadedVersion }: LegacyLauncherNoticeProps) {
-  const currentLabel = downloadedVersion || 'an older build';
-  const latestLabel = latestVersion || 'the current build';
+    setOpeningDashboard(true);
+    setOpenFailed(false);
+
+    const opened = await ipc.openDashboard();
+    setOpeningDashboard(false);
+
+    if (!opened) {
+      setOpenFailed(true);
+    }
+  };
 
   return (
-    <main
-      className="relative flex h-screen w-screen items-center justify-center overflow-hidden bg-[#0d0d0d] px-6 py-8 text-[#ddd]"
-      aria-labelledby="legacy-launcher-title"
-    >
-      <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_top,rgba(255,140,0,0.14),transparent_42%)]" />
-      <section className="relative w-full max-w-lg rounded-2xl border border-[#3c2a18] bg-[#121212] p-7 shadow-[0_24px_80px_rgba(0,0,0,0.45)] sm:p-9">
-        <div className="mb-6 flex size-12 items-center justify-center rounded-xl border border-[#ff8c00]/35 bg-[#ff8c00]/10 text-[#ff9d2e] shadow-[0_0_28px_rgba(255,140,0,0.14)]">
-          <AlertTriangle className="size-6" aria-hidden="true" />
+    <div className="flex h-screen w-screen flex-col bg-[#0d0d0d] font-sans text-[#ddd] selection:bg-[#ff8c00] selection:text-black">
+      <header
+        onMouseDown={(event) => {
+          if ((event.target as HTMLElement).closest('.no-drag')) return;
+          ipc.startDrag();
+        }}
+        className="drag-region flex h-14 shrink-0 select-none items-center border-b border-[#222] bg-[#121212] px-4"
+      >
+        <span className="text-sm font-bold tracking-wide text-white">Launcher update</span>
+        <div className="no-drag ml-auto flex items-center gap-1">
+          <button
+            type="button"
+            onClick={() => ipc.minimize()}
+            className="flex size-7 items-center justify-center rounded text-[#666] transition hover:bg-[#222] hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#ff8c00]"
+            aria-label="Minimize launcher"
+          >
+            <Minus className="size-4" aria-hidden="true" />
+          </button>
+          <button
+            type="button"
+            onClick={() => ipc.close()}
+            className="flex size-7 items-center justify-center rounded text-[#666] transition hover:bg-red-500/20 hover:text-red-400 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-400"
+            aria-label="Close launcher"
+          >
+            <X className="size-4" aria-hidden="true" />
+          </button>
+        </div>
+      </header>
+
+      <main className="flex-1 overflow-y-auto px-6 py-5">
+        <div className="flex items-center gap-2 text-base font-bold tracking-wide text-white">
+          <CircleAlert className="size-4 text-[#ff8c00]" aria-hidden="true" />
+          <h1>Update required</h1>
         </div>
 
-        <p className="text-xs font-bold uppercase tracking-[0.18em] text-[#ff9d2e]">Update Required</p>
-        <h1 id="legacy-launcher-title" className="mt-2 text-balance text-2xl font-bold tracking-tight text-white sm:text-3xl">
-          This Launcher Version Is No Longer Supported
-        </h1>
-        <p className="mt-3 text-sm leading-6 text-[#aaa]">
-          Download the latest launcher from your dashboard to continue using Weave. Launching is unavailable until the update is installed.
-        </p>
+        <section className="relative mt-6 max-w-3xl pl-8" aria-labelledby="launcher-update-message">
+          <div className="absolute bottom-[-30px] left-[10px] top-[20px] w-0.5 bg-[#222]" aria-hidden="true" />
+          <div className="absolute left-[5px] top-[4px] size-3 rotate-45 bg-[#ff8c00] shadow-[0_0_10px_rgba(255,140,0,0.55)]" aria-hidden="true" />
 
-        <dl className="mt-6 grid gap-3 rounded-xl border border-[#292929] bg-[#0d0d0d] p-4 text-sm sm:grid-cols-2">
-          <div>
-            <dt className="text-[11px] font-semibold uppercase tracking-wider text-[#6d6d6d]">Issued version</dt>
-            <dd className="mt-1 break-all font-mono text-[#c4c4c4]">{currentLabel}</dd>
-          </div>
-          <div>
-            <dt className="text-[11px] font-semibold uppercase tracking-wider text-[#6d6d6d]">Latest version</dt>
-            <dd className="mt-1 break-all font-mono text-white">{latestLabel}</dd>
-          </div>
-        </dl>
+          <h2 id="launcher-update-message" className="font-mono text-sm font-bold text-[#f5f1e8]">
+            Please update the launcher
+          </h2>
+          <p className="mt-2 max-w-xl text-xs leading-relaxed text-[#aaa]">
+            This version is no longer supported. Open the dashboard to download the current launcher and continue.
+          </p>
 
-        <a
-          href={dashboardUrl}
-          target="_blank"
-          rel="noreferrer"
-          className="mt-7 flex w-full items-center justify-center gap-2 rounded-xl bg-[#ff8c00] px-5 py-3 text-sm font-extrabold text-black transition-[background-color,transform] hover:bg-[#ffa02b] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#ffb35c] focus-visible:ring-offset-2 focus-visible:ring-offset-[#121212] active:scale-[0.99] motion-reduce:transform-none motion-reduce:transition-none"
-          aria-label="Open Weave dashboard products page to download the latest launcher"
-        >
-          <Download className="size-4" aria-hidden="true" />
-          Download Latest Launcher
-          <ExternalLink className="size-3.5" aria-hidden="true" />
-        </a>
-      </section>
-    </main>
+          <div className="mt-4 max-w-xl rounded-lg border border-[#292929] bg-[#121212] p-4">
+            <p className="text-xs font-semibold text-[#ebe6dc]">Update required to continue</p>
+            <p className="mt-1 text-[11px] text-[#777]">The launcher will remain unavailable until it is updated.</p>
+          </div>
+
+          <button
+            type="button"
+            onClick={openDashboard}
+            disabled={openingDashboard}
+            className="mt-4 inline-flex min-h-10 items-center gap-2 rounded-md border border-[#3b3b3b] bg-[#171717] px-4 text-[11px] font-bold uppercase tracking-wide text-[#e8e3da] transition hover:border-[#555] hover:bg-[#202020] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#ff8c00] disabled:cursor-wait disabled:opacity-60"
+          >
+            <ArrowUpRight className="size-3.5 text-[#ff8c00]" aria-hidden="true" />
+            {openingDashboard ? 'Opening dashboard...' : 'Go to dashboard'}
+          </button>
+
+          {openFailed && (
+            <p className="mt-3 text-xs text-red-400" role="alert">
+              Could not open the dashboard. Please try again.
+            </p>
+          )}
+        </section>
+      </main>
+
+      <footer className="h-20 shrink-0 border-t border-[#222] bg-[#121212]" aria-hidden="true" />
+    </div>
   );
 }

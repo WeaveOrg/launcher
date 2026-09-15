@@ -1,9 +1,11 @@
 #undef UNICODE
 #undef _UNICODE
 #include "loader.hpp"
+#include "http_download_client.hpp"
 #include "orionerror.h"
 #include <windows.h>
 #include <algorithm>
+#include <chrono>
 #include <format>
 #include <fstream>
 #include <http2client/http2client_easy.h>
@@ -11,12 +13,6 @@
 #include <string>
 #include <tlhelp32.h>
 #include <vector>
-
-#ifdef _DEBUG
-#define LAUNCHER_BASE_URL "http://localhost:3000"
-#else
-#define LAUNCHER_BASE_URL "https://launcher.weave.su"
-#endif
 
 #define CDN_URL "https://cdn.weave.su"
 
@@ -268,11 +264,22 @@ bool fetch_and_inject(const std::string &app_id, const std::string &token) {
   http2client::Http2ClientOptions client_opts;
   client_opts.protocol = http2client::HttpProtocol::kAuto;
   client_opts.connect_timeout = 15000;
+  // http2client retries transport reconnects internally. The wrapper below
+  // additionally retries the complete idempotent GET when the request still
+  // ends in a transient network/HTTP failure.
+  client_opts.max_reconnect_attempts = 5;
+  client_opts.reconnect_timeout = 30000;
   http2client::EasyClient client(CDN_URL, client_opts);
   client.Bearer(token).Timeout(15000);
 
   int download_progress = 0;
-  auto resp = client.GetWithProgress(
+  RetryingHttpDownloadClient downloader(
+      [&](std::string_view path, RetryingHttpDownloadClient::ProgressCallback progress) {
+        return client.GetWithProgress(path, std::move(progress));
+      },
+      {.max_attempts = 3, .retry_delay = std::chrono::milliseconds(500)});
+
+  auto resp = downloader.GetWithProgress(
       "/loader.dll",
       [&](std::size_t downloaded, std::optional<std::size_t> total) {
         if (!total.has_value())
