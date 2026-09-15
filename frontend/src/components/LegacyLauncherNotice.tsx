@@ -47,7 +47,7 @@ export function LegacyLauncherNotice({ latestVersion, downloadedVersion }: Legac
           href={dashboardUrl}
           target="_blank"
           rel="noreferrer"
-          className="mt-7 flex w-full items-center justify-center gap-2 rounded-xl bg-[#ff8c00] px-5 py-3 text-sm font-extrabold text-black transition-[background-color,transform] hover:bg-[#ffa02b] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#ffb35c] focus-visible:ring-offset-2 focus-visible:ring-offset-[#121212] active:scale-[0.99]"
+          className="mt-7 flex w-full items-center justify-center gap-2 rounded-xl bg-[#ff8c00] px-5 py-3 text-sm font-extrabold text-black transition-[background-color,transform] hover:bg-[#ffa02b] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#ffb35c] focus-visible:ring-offset-2 focus-visible:ring-offset-[#121212] active:scale-[0.99] motion-reduce:transform-none motion-reduce:transition-none"
           aria-label="Open Weave dashboard products page to download the latest launcher"
         >
           <Download className="size-4" aria-hidden="true" />
