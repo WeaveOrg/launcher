@@ -57,6 +57,12 @@ export interface LauncherProfile {
   // unlocked for this account. The channel toggle is only shown when beta_access.
   channel?: 'stable' | 'beta';
   beta_access?: boolean;
+  // The site records the last build it prepared for this account. These fields
+  // are optional so the launcher remains compatible while the backend rollout
+  // is in progress.
+  latest_launcher_version?: string;
+  launcher_downloaded_version?: string;
+  launcher_update_required?: boolean;
 }
 
 export interface ChangelogItem {
@@ -152,6 +158,17 @@ class WeaveIPCBridge {
     import('@saucer-dev/types').then(saucer => {
       saucer.close().catch(() => {});
     });
+  }
+
+  // Opens the fixed dashboard URL through ShellExecuteW in the native launcher.
+  public async openDashboard(): Promise<boolean> {
+    try {
+      const saucer = await import('@saucer-dev/types');
+      return Boolean(await saucer.call<boolean>('open_dashboard', []));
+    } catch (error) {
+      console.warn('Failed to open dashboard in the default browser', error);
+      return false;
+    }
   }
 
   // HWID and System Spec retrieval

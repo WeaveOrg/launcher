@@ -4,6 +4,7 @@ import React, { useState, useEffect, Suspense } from 'react';
 import { useSearchParams } from 'next/navigation';
 import { LaunchModal } from '@/components/LaunchModal';
 import { LauncherRedesign } from '@/components/LauncherRedesign';
+import { LegacyLauncherNotice } from '@/components/LegacyLauncherNotice';
 import { AuthScreen } from '@/components/AuthScreen';
 import { ipc, AppItem, LauncherProfile, ChangelogItem } from '@/lib/ipc';
 
@@ -21,6 +22,12 @@ function MainLauncherContent() {
   const handleAuthSuccess = async (verifiedUser: LauncherProfile, authToken: string) => {
     setUser(verifiedUser);
     setToken(authToken);
+
+    // Stale launchers must go directly to the site download page. Avoid
+    // loading game data that cannot be used while this mandatory gate is shown.
+    if (verifiedUser.launcher_update_required) {
+      return;
+    }
 
     // Fetch changelogs for product 6a943ac671805d202d5fc1e0 from backend API
     try {
@@ -73,6 +80,10 @@ function MainLauncherContent() {
         onSuccess={handleAuthSuccess} 
       />
     );
+  }
+
+  if (user.launcher_update_required) {
+    return <LegacyLauncherNotice />;
   }
 
   return (

@@ -1,6 +1,8 @@
 cmake_minimum_required(VERSION 3.20)
 project(WeaveLauncher VERSION 2.0.0 LANGUAGES CXX)
 
+include(CTest)
+
 set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
 
 set(CMAKE_CXX_STANDARD 23)
@@ -94,6 +96,16 @@ FetchContent_MakeAvailable(saucer-loop)
 
 target_link_libraries(weave_launcher PRIVATE saucer::saucer saucer::loop)
 
+if(BUILD_TESTING)
+    add_executable(http_download_client_test
+        tests/http_download_client_test.cpp
+    )
+    target_include_directories(http_download_client_test PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/include
+        ${CMAKE_CURRENT_SOURCE_DIR}/thirdparty/http2client/release/include
+    )
+    add_test(NAME http_download_client_test COMMAND http_download_client_test)
+endif()
+
 # Add internal payload DLL loader
 add_subdirectory(loader)
-
