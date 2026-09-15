@@ -57,6 +57,12 @@ export interface LauncherProfile {
   // unlocked for this account. The channel toggle is only shown when beta_access.
   channel?: 'stable' | 'beta';
   beta_access?: boolean;
+  // The site records the last build it prepared for this account. These fields
+  // are optional so the launcher remains compatible while the backend rollout
+  // is in progress.
+  latest_launcher_version?: string;
+  launcher_downloaded_version?: string;
+  launcher_update_required?: boolean;
 }
 
 export interface ChangelogItem {
