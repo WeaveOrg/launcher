@@ -21,6 +21,39 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
+      - name: Restore WebView2 SDK
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+
+          $nugetRoot = Join-Path $env:RUNNER_TEMP 'webview2'
+          nuget install Microsoft.Web.WebView2 `
+            -Version 1.0.3650.58 `
+            -OutputDirectory $nugetRoot `
+            -NonInteractive
+
+          $package = Get-ChildItem -Path $nugetRoot -Directory -Filter 'Microsoft.Web.WebView2.*' |
+              Select-Object -First 1
+          if ($null -eq $package) {
+              throw 'Microsoft.Web.WebView2 NuGet package was not restored.'
+          }
+
+          $packageBuild = Join-Path $package.FullName 'build'
+          $header = Join-Path $packageBuild 'native\include\WebView2.h'
+          $importLibrary = Join-Path $packageBuild 'native\x64\WebView2Loader.dll.lib'
+          if (-not (Test-Path -LiteralPath $header)) {
+              throw "WebView2 header was not found in the restored package: $header"
+          }
+          if (-not (Test-Path -LiteralPath $importLibrary)) {
+              throw "WebView2 x64 import library was not found: $importLibrary"
+          }
+
+          $destinationBuild = Join-Path $env:GITHUB_WORKSPACE 'webview2_pkg\build'
+          New-Item -ItemType Directory -Force $destinationBuild | Out-Null
+          Copy-Item -Path (Join-Path $packageBuild '*') `
+              -Destination $destinationBuild `
+              -Recurse -Force
+
       - name: Configure CMake
         shell: pwsh
         run: cmake -S . -B build -G "Visual Studio 18 2026" -A x64
