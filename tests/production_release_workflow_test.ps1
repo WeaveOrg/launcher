@@ -17,6 +17,7 @@ $requiredPatterns = @(
     'AWS_REGION',
     'S3_BUCKET',
     'S3_ENDPOINT',
+    'Visual Studio 18 2026',
     'loader\.exe',
     'loader\.dll',
     'aws s3 cp'
@@ -26,6 +27,10 @@ foreach ($pattern in $requiredPatterns) {
     if ($workflow -notmatch $pattern) {
         throw "Production release workflow is missing required pattern: $pattern"
     }
+}
+
+if ($workflow -match 'Visual Studio 17 2022') {
+    throw 'Production release workflow still requests the unavailable Visual Studio 2022 generator.'
 }
 
 Write-Host 'Production release workflow contract is valid.'
