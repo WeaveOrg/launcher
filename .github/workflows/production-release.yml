@@ -1,0 +1,93 @@
+name: Production release
+
+on:
+  push:
+    branches: [master]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  release:
+    runs-on: windows-latest
+    environment: PRODUCTION
+    env:
+      AWS_REGION: ${{ vars.AWS_REGION }}
+      S3_BUCKET: ${{ vars.S3_BUCKET }}
+      S3_ENDPOINT: ${{ vars.S3_ENDPOINT }}
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Configure CMake
+        shell: pwsh
+        run: cmake -S . -B build -G "Visual Studio 17 2022" -A x64
+
+      - name: Build and protect Release artifacts
+        shell: pwsh
+        run: cmake --build build --config Release --parallel 2
+
+      - name: Package release files
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+
+          $launcherSource = Join-Path $env:GITHUB_WORKSPACE 'build\Release\weave_launcher.exe'
+          $launcher = Join-Path $env:GITHUB_WORKSPACE 'build\Release\loader.exe'
+          $protectedDll = Join-Path $env:GITHUB_WORKSPACE 'build\loader\Release\loader.dll'
+
+          if (-not (Test-Path -LiteralPath $launcherSource)) {
+              throw "Launcher was not built: $launcherSource"
+          }
+
+          if (-not (Test-Path -LiteralPath $protectedDll)) {
+              throw "Protected DLL was not created: $protectedDll"
+          }
+
+          Copy-Item -LiteralPath $launcherSource -Destination $launcher -Force
+
+          foreach ($file in @($launcher, $protectedDll)) {
+              if (-not (Test-Path -LiteralPath $file)) {
+                  throw "Release artifact was not created: $file"
+              }
+
+              if ((Get-Item -LiteralPath $file).Length -le 0) {
+                  throw "Release artifact is empty: $file"
+              }
+          }
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ vars.AWS_REGION }}
+
+      - name: Upload release files to S3
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+
+          if ([string]::IsNullOrWhiteSpace($env:S3_BUCKET)) {
+              throw 'S3_BUCKET is not configured in the PRODUCTION environment.'
+          }
+
+          $endpointArgs = @()
+          if (-not [string]::IsNullOrWhiteSpace($env:S3_ENDPOINT)) {
+              $endpointArgs = @('--endpoint-url', $env:S3_ENDPOINT)
+          }
+
+          $launcher = Join-Path $env:GITHUB_WORKSPACE 'build\Release\loader.exe'
+          $protectedDll = Join-Path $env:GITHUB_WORKSPACE 'build\loader\Release\loader.dll'
+
+          & aws s3 cp $launcher "s3://$env:S3_BUCKET/loader.exe" @endpointArgs
+          if ($LASTEXITCODE -ne 0) {
+              throw 'S3 upload failed for loader.exe.'
+          }
+
+          & aws s3 cp $protectedDll "s3://$env:S3_BUCKET/loader.dll" @endpointArgs
+          if ($LASTEXITCODE -ne 0) {
+              throw 'S3 upload failed for loader.dll.'
+          }
