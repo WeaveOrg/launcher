@@ -36,4 +36,14 @@ if ($workflow -match 'Visual Studio 17 2022') {
     throw 'Production release workflow still requests the unavailable Visual Studio 2022 generator.'
 }
 
+if ($workflow -match 'aws-actions/configure-aws-credentials') {
+    throw 'Production release workflow must not call AWS STS for the S3-compatible endpoint.'
+}
+
+foreach ($credential in @('AWS_ACCESS_KEY_ID', 'AWS_SECRET_ACCESS_KEY')) {
+    if ($workflow -notmatch "${credential}:\s*\$\{\{\s*secrets\.${credential}\s*\}\}") {
+        throw "Production release workflow must export $credential directly from GitHub Secrets."
+    }
+}
+
 Write-Host 'Production release workflow contract is valid.'
