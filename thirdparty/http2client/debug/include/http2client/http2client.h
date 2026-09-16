@@ -86,7 +86,9 @@ struct Error {
 
   // Diagnostic context
   std::string request_uri;        // scheme://authority/path for HTTP/gRPC
-  std::string operation;          // "TLS handshake", "gRPC unary", "DNS lookup"
+  // Failed stage, e.g. "proxy resolution", "DNS lookup", "TCP connect",
+  // "proxy CONNECT", "TLS handshake", "response headers", or "response body".
+  std::string operation;
   std::uint64_t retry_count = 0;  // Number of reconnect attempts before failure
   std::uint64_t elapsed_ms = 0;   // Milliseconds from request start to error
   std::string grpc_status_message; // gRPC status detail message
@@ -122,8 +124,9 @@ struct TlsOptions {
 
 enum class ProxyMode {
   // Use the Windows per-user proxy configuration (WinINet/IE settings) when
-  // one is configured for the target scheme; connect directly otherwise.
-  // PAC scripts / WPAD auto-detection are not evaluated.
+  // one is configured for the target scheme; PAC scripts and WPAD
+  // auto-detection are evaluated for the target URL, with static settings as
+  // a fallback. Connect directly when no proxy is resolved.
   kSystemDefault,
   // Always tunnel through host:port below via HTTP CONNECT.
   kManual,
