@@ -26,7 +26,11 @@ export const LauncherRedesign: React.FC<LauncherRedesignProps> = ({
   onChannelChanged
 }) => {
   const safeApps = Array.isArray(apps) ? apps : [];
-  const safeChangelogs = Array.isArray(changelogs) ? changelogs : [];
+  // Backend returns entries oldest-first; the timeline (and the header version,
+  // which reads index 0) expects the newest release on top.
+  const safeChangelogs = (Array.isArray(changelogs) ? [...changelogs] : []).sort(
+    (a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
+  );
 
   // Release channel. The toggle is only rendered when the account holds beta
   // access; the switch persists server-side and takes effect on the next launch
