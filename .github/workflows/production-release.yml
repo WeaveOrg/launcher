@@ -56,9 +56,24 @@ jobs:
               -Destination $destinationBuild `
               -Recurse -Force
 
+      # saucer and its ~10 transitive packages are fetched and built into
+      # build/_deps. They are pinned to exact commits in CMakeLists.txt, so the
+      # sources, generated projects and compiled .lib/.obj files can be reused
+      # across runs; the key changes only when CMakeLists.txt (the pins) or the
+      # workflow (toolchain) changes.
+      - name: Cache fetched dependencies
+        uses: actions/cache@v4
+        with:
+          path: build/_deps
+          key: deps-${{ runner.os }}-vs2026-x64-${{ hashFiles('CMakeLists.txt', '.github/workflows/production-release.yml') }}
+
+      # FETCHCONTENT_UPDATES_DISCONNECTED skips the per-configure `git fetch`
+      # for populated deps; a cache miss still downloads them.
       - name: Configure CMake
         shell: pwsh
-        run: cmake -S . -B build -G "Visual Studio 18 2026" -A x64
+        run: >-
+          cmake -S . -B build -G "Visual Studio 18 2026" -A x64
+          -D FETCHCONTENT_UPDATES_DISCONNECTED=ON
 
       - name: Build and protect Release artifacts
         shell: pwsh

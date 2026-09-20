@@ -72,18 +72,21 @@ if(WIN32)
 
 endif()
 
+# Pinned to exact commits: reproducible builds, and CI can cache build/_deps
+# (the key is derived from this file). Bump deliberately.
+# saucer c7dca16 = v8.0.5 line, 2026-07-28; loop 330352a = 2025-11-17.
 include(FetchContent)
 FetchContent_Declare(
     saucer
     GIT_REPOSITORY https://github.com/saucer/saucer.git
-    GIT_TAG        master
+    GIT_TAG        c7dca16ca84b6ebde3ec74e8944238740eb38694
 )
 FetchContent_MakeAvailable(saucer)
 
 FetchContent_Declare(
     saucer-loop
     GIT_REPOSITORY https://github.com/saucer/loop.git
-    GIT_TAG        master
+    GIT_TAG        330352ab2a116d36573f5fbc4db4b8783932a3e8
 )
 FetchContent_MakeAvailable(saucer-loop)
 
