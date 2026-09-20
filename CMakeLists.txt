@@ -70,13 +70,6 @@ if(WIN32)
         $<TARGET_FILE_DIR:weave_launcher>
     )
 
-    # Copy app.ico next to the executable so the window icon can be set at
-    # startup (before the webview loads and reports a favicon).
-    add_custom_command(TARGET weave_launcher POST_BUILD
-        COMMAND ${CMAKE_COMMAND} -E copy_if_different
-        "${CMAKE_CURRENT_SOURCE_DIR}/resources/app.ico"
-        $<TARGET_FILE_DIR:weave_launcher>
-    )
 endif()
 
 include(FetchContent)

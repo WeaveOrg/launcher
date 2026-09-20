@@ -24,6 +24,7 @@
 #include <saucer/smartview.hpp>
 #include <saucer/modules/loop.hpp>
 #include <saucer/window.hpp>
+#include <saucer/modules/stable/webview2.hpp>
 
 #define LAUNCHER_URL "https://launcher.weave.su"
 
@@ -54,22 +55,27 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR lpCmdLine, int nCmdShow
     window->set_decorations(saucer::window::decoration::partial);
     window->set_background(saucer::color{0, 0, 0, 255}); // Black background
 
-    // Set window icon immediately from the bundled app.ico so it's visible
-    // right at startup, instead of waiting for the webview to load the page
-    // and report its favicon.
+    // Window/taskbar icon comes from the ICON resource compiled into the exe
+    // (resources/app.rc, id 1), so it works for the standalone downloaded
+    // binary and needs no app.ico next to it. We bypass saucer::window::set_icon:
+    // it goes through GDI+, which only ever picks one ICO frame (the 16x16 one)
+    // and sets ICON_BIG alone, so the taskbar ends up with an upscaled 16px
+    // image. LoadImage lets Windows pick the best-matching frame per size.
+    // The webview's favicon is deliberately not applied to the window.
     {
-        wchar_t exe_path[MAX_PATH];
-        GetModuleFileNameW(nullptr, exe_path, MAX_PATH);
-        std::filesystem::path icon_path = std::filesystem::path(exe_path).parent_path() / "app.ico";
-        if (auto icon = saucer::icon::from(icon_path); icon.has_value()) {
-            window->set_icon(icon.value());
+        const HWND hwnd = window->native<true>().hwnd;
+        const HINSTANCE module = GetModuleHandleW(nullptr);
+        const UINT dpi = GetDpiForWindow(hwnd);
+        const int small_px = GetSystemMetricsForDpi(SM_CXSMICON, dpi);
+        const int big_px = GetSystemMetricsForDpi(SM_CXICON, dpi);
+
+        if (auto *small_icon = static_cast<HICON>(LoadImageW(module, MAKEINTRESOURCEW(1), IMAGE_ICON, small_px, small_px, LR_DEFAULTCOLOR | LR_SHARED))) {
+            SendMessageW(hwnd, WM_SETICON, ICON_SMALL, reinterpret_cast<LPARAM>(small_icon));
+        }
+        if (auto *big_icon = static_cast<HICON>(LoadImageW(module, MAKEINTRESOURCEW(1), IMAGE_ICON, big_px, big_px, LR_DEFAULTCOLOR | LR_SHARED))) {
+            SendMessageW(hwnd, WM_SETICON, ICON_BIG, reinterpret_cast<LPARAM>(big_icon));
         }
     }
-
-    // Fall back to the site's live favicon if it ever changes.
-    webview.on<saucer::webview::event::favicon>([window](const saucer::icon &icon) {
-        window->set_icon(icon);
-    });
 
     // Expose stage state (std::string and int) to frontend
     webview.expose("get_stage_name", []() -> std::string {
