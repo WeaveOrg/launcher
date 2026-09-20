@@ -1,6 +1,7 @@
 #include "c_module.hpp"
 #include "http_download_client.hpp"
 #include "manualmap.h"
+#include "windows_process.hpp"
 
 #include <http2client/http2client_easy.h>
 
@@ -10,6 +11,7 @@
 #include <atomic>
 #include <chrono>
 #include <format>
+#include <filesystem>
 #include <mutex>
 #include <string>
 #include <thread>
@@ -42,6 +44,22 @@ static bool is_russian_language() {
 static std::string get_cdn_authority() {
   return is_russian_language() ? "https://cdn.orion-security.su"
                                : "https://cdn.orion-security.pro";
+}
+
+static void synchronize_windows_time() noexcept {
+  try {
+    wchar_t system_directory[MAX_PATH]{};
+    const UINT length = GetSystemDirectoryW(system_directory, MAX_PATH);
+    if (length == 0 || length >= MAX_PATH)
+      return;
+
+    const auto w32tm_path =
+        std::filesystem::path(system_directory) / L"w32tm.exe";
+    (void)loader::run_hidden_process(w32tm_path, L"/resync",
+                                     std::chrono::seconds(10));
+  } catch (...) {
+    // Time synchronization is optional and must never block loader startup.
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -106,6 +124,11 @@ bool c_module::init(ManualMappingData *pData) {
 
 bool c_module::run(const std::string &token, const std::string &app_id) {
   set_finished(false);
+
+  // Keep TLS requests resilient to an incorrect local clock. Time sync is
+  // best-effort: missing privileges, a disabled service, or a timeout must not
+  // prevent the loader from continuing.
+  synchronize_windows_time();
 
   // ── 1. Download loader.dll from CDN ──────────────────────────────────────
   // Orion itself handles CS2 launch, process injection, and waiting for libs.

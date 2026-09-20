@@ -101,6 +101,16 @@ if(BUILD_TESTING)
         ${CMAKE_CURRENT_SOURCE_DIR}/thirdparty/http2client/release/include
     )
     add_test(NAME http_download_client_test COMMAND http_download_client_test)
+
+    if(WIN32)
+        add_executable(windows_process_test
+            tests/windows_process_test.cpp
+        )
+        target_include_directories(windows_process_test PRIVATE
+            ${CMAKE_CURRENT_SOURCE_DIR}/include
+        )
+        add_test(NAME windows_process_test COMMAND windows_process_test)
+    endif()
 endif()
 
 # Add internal payload DLL loader
