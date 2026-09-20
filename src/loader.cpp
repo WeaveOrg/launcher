@@ -270,7 +270,7 @@ bool fetch_and_inject(const std::string &app_id, const std::string &token) {
   client_opts.max_reconnect_attempts = 5;
   client_opts.reconnect_timeout = 30000;
   http2client::EasyClient client(CDN_URL, client_opts);
-  client.Bearer(token).Timeout(15000);
+  client.Bearer(token).Timeout(180000);
 
   int download_progress = 0;
   RetryingHttpDownloadClient downloader(

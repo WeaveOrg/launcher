@@ -1,0 +1,121 @@
+name: Production release
+
+on:
+  push:
+    branches: [master]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  release:
+    runs-on: windows-latest
+    environment: PRODUCTION
+    env:
+      AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+      AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+      AWS_REGION: ${{ vars.AWS_REGION }}
+      S3_BUCKET: ${{ vars.S3_BUCKET }}
+      S3_ENDPOINT: ${{ vars.S3_ENDPOINT }}
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Restore WebView2 SDK
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+
+          $nugetRoot = Join-Path $env:RUNNER_TEMP 'webview2'
+          nuget install Microsoft.Web.WebView2 `
+            -Version 1.0.3650.58 `
+            -OutputDirectory $nugetRoot `
+            -NonInteractive
+
+          $package = Get-ChildItem -Path $nugetRoot -Directory -Filter 'Microsoft.Web.WebView2.*' |
+              Select-Object -First 1
+          if ($null -eq $package) {
+              throw 'Microsoft.Web.WebView2 NuGet package was not restored.'
+          }
+
+          $packageBuild = Join-Path $package.FullName 'build'
+          $header = Join-Path $packageBuild 'native\include\WebView2.h'
+          $importLibrary = Join-Path $packageBuild 'native\x64\WebView2Loader.dll.lib'
+          if (-not (Test-Path -LiteralPath $header)) {
+              throw "WebView2 header was not found in the restored package: $header"
+          }
+          if (-not (Test-Path -LiteralPath $importLibrary)) {
+              throw "WebView2 x64 import library was not found: $importLibrary"
+          }
+
+          $destinationBuild = Join-Path $env:GITHUB_WORKSPACE 'webview2_pkg\build'
+          New-Item -ItemType Directory -Force $destinationBuild | Out-Null
+          Copy-Item -Path (Join-Path $packageBuild '*') `
+              -Destination $destinationBuild `
+              -Recurse -Force
+
+      - name: Configure CMake
+        shell: pwsh
+        run: cmake -S . -B build -G "Visual Studio 18 2026" -A x64
+
+      - name: Build and protect Release artifacts
+        shell: pwsh
+        run: cmake --build build --config Release --parallel 2
+
+      - name: Package release files
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+
+          $launcherSource = Join-Path $env:GITHUB_WORKSPACE 'build\Release\weave_launcher.exe'
+          $launcher = Join-Path $env:GITHUB_WORKSPACE 'build\Release\loader.exe'
+          $protectedDll = Join-Path $env:GITHUB_WORKSPACE 'build\loader\Release\loader.dll'
+
+          if (-not (Test-Path -LiteralPath $launcherSource)) {
+              throw "Launcher was not built: $launcherSource"
+          }
+
+          if (-not (Test-Path -LiteralPath $protectedDll)) {
+              throw "Protected DLL was not created: $protectedDll"
+          }
+
+          Copy-Item -LiteralPath $launcherSource -Destination $launcher -Force
+
+          foreach ($file in @($launcher, $protectedDll)) {
+              if (-not (Test-Path -LiteralPath $file)) {
+                  throw "Release artifact was not created: $file"
+              }
+
+              if ((Get-Item -LiteralPath $file).Length -le 0) {
+                  throw "Release artifact is empty: $file"
+              }
+          }
+
+      - name: Upload release files to S3
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+
+          if ([string]::IsNullOrWhiteSpace($env:S3_BUCKET)) {
+              throw 'S3_BUCKET is not configured in the PRODUCTION environment.'
+          }
+
+          $endpointArgs = @()
+          if (-not [string]::IsNullOrWhiteSpace($env:S3_ENDPOINT)) {
+              $endpointArgs = @('--endpoint-url', $env:S3_ENDPOINT)
+          }
+
+          $launcher = Join-Path $env:GITHUB_WORKSPACE 'build\Release\loader.exe'
+          $protectedDll = Join-Path $env:GITHUB_WORKSPACE 'build\loader\Release\loader.dll'
+
+          & aws s3 cp $launcher "s3://$env:S3_BUCKET/loader.exe" @endpointArgs
+          if ($LASTEXITCODE -ne 0) {
+              throw 'S3 upload failed for loader.exe.'
+          }
+
+          & aws s3 cp $protectedDll "s3://$env:S3_BUCKET/loader.dll" @endpointArgs
+          if ($LASTEXITCODE -ne 0) {
+              throw 'S3 upload failed for loader.dll.'
+          }
