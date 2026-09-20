@@ -7,6 +7,7 @@ import { LauncherRedesign } from '@/components/LauncherRedesign';
 import { LegacyLauncherNotice } from '@/components/LegacyLauncherNotice';
 import { AuthScreen } from '@/components/AuthScreen';
 import { ipc, AppItem, LauncherProfile, ChangelogItem } from '@/lib/ipc';
+import { MOCK_ENABLED, mockParam } from '@/lib/mock';
 
 function MainLauncherContent() {
   const searchParams = useSearchParams();
@@ -64,6 +65,14 @@ function MainLauncherContent() {
     setUser((prev) => (prev ? { ...prev, channel } : prev));
     await refreshApps();
   };
+
+  // Mock mode: `?mock_open=launch` opens the launch modal as soon as the
+  // product list is in, so every modal state can be screenshotted headlessly.
+  useEffect(() => {
+    if (MOCK_ENABLED && apps.length > 0 && mockParam('mock_open') === 'launch') {
+      setActiveLaunchApp(apps[0]);
+    }
+  }, [apps]);
 
   const handleLogout = () => {
     if (typeof window !== 'undefined') {

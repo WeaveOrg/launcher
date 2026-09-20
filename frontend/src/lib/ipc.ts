@@ -1,6 +1,8 @@
 // IPC Bridge for Weave Launcher
 // Communicates with Saucer C++ native engine and/or the Backend Loader Server
 
+import { MOCK_ENABLED, mockApps, mockLaunch } from './mock';
+
 export interface AppItem {
   id: string;
   name: string;
@@ -100,7 +102,7 @@ class WeaveIPCBridge {
   private wsListeners: ((data: any) => void)[] = [];
 
   constructor() {
-    if (typeof window !== 'undefined') {
+    if (typeof window !== 'undefined' && !MOCK_ENABLED) {
       this.initWebSocket();
     }
   }
@@ -225,6 +227,9 @@ class WeaveIPCBridge {
 
   // Fetch Catalog Apps (Products)
   public async getApps(): Promise<AppItem[]> {
+    if (MOCK_ENABLED) {
+      return mockApps;
+    }
     try {
       const token = typeof window !== 'undefined' ? localStorage.getItem('launcher_token') || '' : '';
       const res = await fetch(`${BACKEND_URL}/api/v1/products?token=${encodeURIComponent(token)}`);
@@ -347,6 +352,9 @@ class WeaveIPCBridge {
       isFinal: boolean
     ) => void
   ): Promise<{ success: boolean; message: string }> {
+    if (MOCK_ENABLED) {
+      return mockLaunch(app, onProgress);
+    }
     try {
       const saucer = await import('@saucer-dev/types');
       const authToken = token || (typeof window !== 'undefined' ? localStorage.getItem('launcher_token') || '' : '');

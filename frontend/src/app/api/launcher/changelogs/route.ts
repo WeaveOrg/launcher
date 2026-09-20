@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { MOCK_ENABLED, mockChangelogs } from '@/lib/mock';
 
 const BACKEND_BASE_URL = 
   process.env.BACKEND_API_URL || 
@@ -7,6 +8,9 @@ const BACKEND_BASE_URL =
   'http://localhost:4000';
 
 export async function GET(request: NextRequest) {
+  if (MOCK_ENABLED) {
+    return NextResponse.json(mockChangelogs);
+  }
   try {
     // 1. Extract token from query param, cookies, or header
     const rawToken = 

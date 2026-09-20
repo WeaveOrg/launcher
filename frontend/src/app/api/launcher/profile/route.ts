@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { MOCK_ENABLED, mockProfile } from '@/lib/mock';
 
 const BACKEND_BASE_URL = 
   process.env.BACKEND_API_URL || 
@@ -7,6 +8,15 @@ const BACKEND_BASE_URL =
   'http://localhost:4000';
 
 export async function GET(request: NextRequest) {
+  if (MOCK_ENABLED) {
+    // `?token=stale` renders the mandatory-update gate.
+    const stale = request.nextUrl.searchParams.get('token') === 'stale';
+    return NextResponse.json(
+      stale
+        ? { ...mockProfile, launcher_downloaded_version: '1.3.0', launcher_update_required: true }
+        : mockProfile,
+    );
+  }
   try {
     // 1. Extract token from query param, cookies, or header
     const rawToken = 

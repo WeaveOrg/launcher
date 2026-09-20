@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { MOCK_ENABLED } from '@/lib/mock';
 
 const BACKEND_BASE_URL =
   process.env.BACKEND_API_URL ||
@@ -9,6 +10,9 @@ const BACKEND_BASE_URL =
 // Proxy for the launcher's release-channel switch. Mirrors the profile proxy:
 // the launcher token rides in query and header, the body carries {channel}.
 export async function PUT(request: NextRequest) {
+  if (MOCK_ENABLED) {
+    return NextResponse.json({ success: true });
+  }
   try {
     const rawToken =
       request.nextUrl.searchParams.get('token') ||
