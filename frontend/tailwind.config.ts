@@ -8,49 +8,38 @@ const config: Config = {
   ],
   theme: {
     extend: {
+      // Tokens live in globals.css; keep the two in sync.
       colors: {
         background: "var(--background)",
         foreground: "var(--foreground)",
-        weave: {
-          50: '#f5f3ff',
-          100: '#ede9fe',
-          200: '#ddd6fe',
-          300: '#c4b5fd',
-          400: '#a78bfa',
-          500: '#8b5cf6',
-          600: '#7c3aed',
-          700: '#6d28d9',
-          800: '#5b21b6',
-          900: '#4c1d95',
-          950: '#2e1065',
+        ink: {
+          0: "rgb(var(--ink-0) / <alpha-value>)",
+          1: "rgb(var(--ink-1) / <alpha-value>)",
+          2: "rgb(var(--ink-2) / <alpha-value>)",
+          3: "rgb(var(--ink-3) / <alpha-value>)",
         },
-        cyber: {
-          blue: '#00f0ff',
-          pink: '#ff007f',
-          neon: '#39ff14',
-          dark: '#0a0a0f',
-          surface: '#12131c',
-          panel: '#181926'
-        }
+        line: {
+          DEFAULT: "rgb(var(--line) / <alpha-value>)",
+          strong: "rgb(var(--line-strong) / <alpha-value>)",
+        },
+        fg: {
+          0: "rgb(var(--fg-0) / <alpha-value>)",
+          1: "rgb(var(--fg-1) / <alpha-value>)",
+          2: "rgb(var(--fg-2) / <alpha-value>)",
+        },
+        accent: {
+          DEFAULT: "rgb(var(--accent) / <alpha-value>)",
+          hover: "rgb(var(--accent-hover) / <alpha-value>)",
+          fg: "rgb(var(--accent-fg) / <alpha-value>)",
+        },
+        ok: "rgb(var(--ok) / <alpha-value>)",
+        warn: "rgb(var(--warn) / <alpha-value>)",
+        danger: "rgb(var(--danger) / <alpha-value>)",
       },
       fontFamily: {
-        sans: ['Inter', 'system-ui', 'sans-serif'],
-        mono: ['JetBrains Mono', 'monospace'],
+        sans: ['"Segoe UI Variable Text"', '"Segoe UI"', 'Inter', 'system-ui', 'sans-serif'],
+        mono: ['"Cascadia Mono"', 'Consolas', '"JetBrains Mono"', 'monospace'],
       },
-      animation: {
-        'pulse-glow': 'pulseGlow 2.5s infinite ease-in-out',
-        'scanline': 'scanline 8s linear infinite',
-      },
-      keyframes: {
-        pulseGlow: {
-          '0%, 100%': { opacity: '0.6', filter: 'drop-shadow(0 0 15px rgba(124, 58, 237, 0.4))' },
-          '50%': { opacity: '1', filter: 'drop-shadow(0 0 25px rgba(124, 58, 237, 0.8))' },
-        },
-        scanline: {
-          '0%': { transform: 'translateY(-100%)' },
-          '100%': { transform: 'translateY(1000%)' },
-        }
-      }
     },
   },
   plugins: [],

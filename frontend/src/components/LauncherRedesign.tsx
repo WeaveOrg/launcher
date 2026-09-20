@@ -2,18 +2,25 @@
 
 import React, { useState } from 'react';
 import { ipc, AppItem, LauncherProfile, ChangelogItem } from '../lib/ipc';
-import { Play, Minus, X, CheckCircle2, User, Sparkles } from 'lucide-react';
+import { Play, User } from 'lucide-react';
+import { WeaveMark } from './WeaveMark';
+import { TitleBar, WindowShell } from './WindowChrome';
 
 interface LauncherRedesignProps {
   apps: AppItem[];
   user: LauncherProfile;
   token: string;
   changelogs: ChangelogItem[];
-  onlineCount: number;
-  ping: number;
   onLaunch: (app: AppItem) => void;
   onLogout: () => void;
   onChannelChanged?: (channel: 'stable' | 'beta') => void | Promise<void>;
+}
+
+function formatDate(iso?: string) {
+  if (!iso) return '';
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return '';
+  return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
 }
 
 export const LauncherRedesign: React.FC<LauncherRedesignProps> = ({
@@ -22,12 +29,11 @@ export const LauncherRedesign: React.FC<LauncherRedesignProps> = ({
   token,
   changelogs,
   onLaunch,
-  onLogout,
-  onChannelChanged
+  onChannelChanged,
 }) => {
   const safeApps = Array.isArray(apps) ? apps : [];
-  // Backend returns entries oldest-first; the timeline (and the header version,
-  // which reads index 0) expects the newest release on top.
+  // Backend returns entries oldest-first; the timeline expects the newest
+  // release on top.
   const safeChangelogs = (Array.isArray(changelogs) ? [...changelogs] : []).sort(
     (a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
   );
@@ -56,185 +62,134 @@ export const LauncherRedesign: React.FC<LauncherRedesignProps> = ({
     setSwitching(false);
   };
 
-  // Get the first available app from the backend, or default fallback if backend is empty
-  const activeApp = safeApps.length > 0 ? safeApps[0] : ({
-    id: '0',
-    name: 'Loading...',
-    processName: 'unknown.exe',
-    status: 'Undetected',
-    banner: ''
-  } as AppItem);
-
-  const latestVersion = safeChangelogs.length > 0 ? safeChangelogs[0].version : '...';
+  const activeApp: AppItem | null = safeApps.length > 0 ? safeApps[0] : null;
+  const canLaunch = Boolean(activeApp) && activeApp?.status !== 'Maintenance';
 
   return (
-    <div className="flex flex-col h-screen w-screen bg-[#0d0d0d] text-[#ddd] font-sans selection:bg-[#ff8c00] selection:text-black">
-      
-      {/* UNIFIED MINIMAL HEADER (TitleBar + Game Info + User Profile) */}
-      <header
-        onMouseDown={(e) => {
-          if ((e.target as HTMLElement).closest('.no-drag')) return;
-          ipc.startDrag();
-        }}
-        className="h-14 flex items-center justify-between px-4 drag-region select-none bg-[#121212] border-b border-[#222]"
-      >
-        {/* Left: Game Info */}
-        <div className="flex items-center gap-3 no-drag">
-          <div className="w-8 h-8 rounded-md bg-[#1a1a1a] border border-[#333] flex items-center justify-center overflow-hidden">
-            <img 
-              src={activeApp.banner || "https://cdn.akamai.steamstatic.com/steam/apps/730/header.jpg"} 
-              alt={activeApp.name}
-              className="w-full h-full object-cover"
-              onError={(e) => { e.currentTarget.style.display = 'none'; }}
-            />
-          </div>
-          <div className="flex flex-col">
-            <span className="font-bold text-white text-sm tracking-wide">{activeApp.name}</span>
-            <div className="flex items-center gap-1.5 text-[10px] font-mono text-[#888]">
-              <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 shadow-[0_0_5px_#10b981]" />
-              <span className="text-emerald-400">{activeApp.status?.toUpperCase() || 'UNDETECTED'}</span>
-              <span className="mx-1">•</span>
-              <span>{latestVersion}</span>
-            </div>
-          </div>
-        </div>
-
-        {/* Right: User Profile & Window Controls */}
-        <div className="flex items-center gap-3 no-drag">
-          {/* User Profile Pill */}
-          <div className="flex items-center gap-2 px-2.5 py-1 rounded-full bg-[#181818] border border-[#2a2a2a]">
+    <WindowShell>
+      <TitleBar
+        trailing={
+          <div className="flex items-center gap-2 rounded-full border border-line bg-ink-2 py-1 pl-1.5 pr-3">
             {user.avatar ? (
-              <img 
-                src={user.avatar} 
-                alt={user.username} 
-                className="w-5 h-5 rounded-full object-cover border border-[#444]"
+              <img
+                src={user.avatar}
+                alt=""
+                className="size-5 rounded-full border border-line-strong object-cover"
                 onError={(e) => { e.currentTarget.style.display = 'none'; }}
               />
             ) : (
-              <div className="w-5 h-5 rounded-full bg-[#252525] flex items-center justify-center text-[#888]">
-                <User className="w-3 h-3" />
-              </div>
+              <span className="flex size-5 items-center justify-center rounded-full bg-ink-3 text-fg-1">
+                <User className="size-3" aria-hidden="true" />
+              </span>
             )}
-            <span className="text-xs font-semibold text-white tracking-tight">{user.username}</span>
+            <span className="text-xs font-semibold text-fg-0">{user.username}</span>
           </div>
+        }
+      >
+        <WeaveMark width={30} className="shrink-0 text-accent" />
+        <span className="truncate text-sm font-semibold text-fg-0">{activeApp?.name ?? 'Weave'}</span>
+      </TitleBar>
 
-          {/* Window Controls */}
-          <div className="flex items-center gap-1 pl-2 border-l border-[#222]">
-            <button
-              onClick={() => ipc.minimize()}
-              className="w-7 h-7 flex items-center justify-center text-[#666] hover:text-white hover:bg-[#222] rounded transition"
-              title="Minimize"
-            >
-              <Minus className="w-4 h-4" />
-            </button>
-            <button
-              onClick={() => ipc.close()}
-              className="w-7 h-7 flex items-center justify-center text-[#666] hover:text-white hover:bg-red-500/20 hover:text-red-400 rounded transition"
-              title="Close"
-            >
-              <X className="w-4 h-4" />
-            </button>
-          </div>
-        </div>
-      </header>
+      {/* MAIN: changelog timeline */}
+      <main className="flex-1 overflow-y-auto px-6 pb-4 pt-4">
+        <div className="mx-auto flex w-full max-w-3xl flex-col gap-3">
+          <h2 className="text-sm font-semibold text-fg-0">Changelog</h2>
 
-      {/* MAIN CONTENT: Minimal Changelog */}
-      <main className="flex-1 overflow-y-auto custom-scrollbar px-6 py-4 bg-[#0d0d0d] flex justify-center">
-        <div className="max-w-3xl w-full flex flex-col gap-3">
-          
-          <div className="flex items-center justify-between mb-1">
-            <div className="flex items-center gap-2">
-              <CheckCircle2 className="w-4 h-4 text-[#ff8c00]" />
-              <h2 className="text-base font-bold text-white tracking-wide">Changelog</h2>
-            </div>
-            <div className="text-[10px] uppercase font-mono tracking-wider text-[#555] flex items-center gap-2">
-              <span className="w-1.5 h-1.5 rounded-full bg-emerald-500/50"></span>
-              All systems operational
-            </div>
-          </div>
-
-          <div className="flex flex-col gap-4 relative before:absolute before:inset-y-0 before:left-[11px] before:w-[2px] before:bg-[#222]">
-            {safeChangelogs.length > 0 ? (
-              safeChangelogs.map((item, idx) => (
-                <div key={item.id || idx} className="relative pl-8">
-                  <div className={`absolute left-[6px] top-[6px] w-3 h-3 rotate-45 z-10 ${
-                    idx === 0 
-                      ? 'bg-[#ff8c00] shadow-[0_0_10px_rgba(255,140,0,0.6)]' 
-                      : 'bg-[#121212] border-2 border-[#444]'
-                  }`} />
-                  <div className="flex items-center gap-3 mb-1">
-                    <span className={`font-mono text-sm font-bold ${idx === 0 ? 'text-white' : 'text-[#888]'}`}>
-                      {item.version || `Update #${idx + 1}`}
-                    </span>
-                    <span className="text-xs text-[#666]">
-                      {item.created_at ? new Date(item.created_at).toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' }) : 'Recent'}
-                    </span>
-                    {item.title && (
-                      <span className="text-xs font-semibold text-[#aaa]">• {item.title}</span>
-                    )}
-                  </div>
-                  <div className={`border rounded-lg p-3.5 shadow-sm ${
-                    idx === 0 ? 'bg-[#121212] border-[#222]' : 'bg-[#121212]/50 border-[#1a1a1a]'
-                  }`}>
-                    <div className="text-xs text-[#aaa] whitespace-pre-line leading-relaxed">
-                      {item.content}
+          {safeChangelogs.length > 0 ? (
+            <ol className="relative flex flex-col gap-4 before:absolute before:bottom-2 before:left-[5px] before:top-2 before:w-px before:bg-line">
+              {safeChangelogs.map((item, idx) => {
+                const latest = idx === 0;
+                return (
+                  <li key={item.id || idx} className="relative pl-6">
+                    <span
+                      aria-hidden="true"
+                      className={`absolute left-0 top-[5px] size-[11px] rounded-full border-2 ${
+                        latest
+                          ? 'border-accent bg-accent shadow-[0_0_8px_rgba(255,140,0,0.55)]'
+                          : 'border-line-strong bg-ink-0'
+                      }`}
+                    />
+                    <div className="flex items-baseline gap-2">
+                      <span className={`font-mono text-[13px] font-semibold ${latest ? 'text-fg-0' : 'text-fg-1'}`}>
+                        {item.version || `Update #${safeChangelogs.length - idx}`}
+                      </span>
+                      {item.title && (
+                        <span className={`text-[13px] font-medium ${latest ? 'text-fg-0' : 'text-fg-1'}`}>
+                          {item.title}
+                        </span>
+                      )}
+                      {latest && (
+                        <span className="rounded-full bg-accent/15 px-1.5 py-px text-[10px] font-semibold uppercase tracking-wide text-accent">
+                          Latest
+                        </span>
+                      )}
+                      <span className="ml-auto shrink-0 text-[11px] text-fg-2">{formatDate(item.created_at) || 'Recent'}</span>
                     </div>
-                  </div>
-                </div>
-              ))
-            ) : (
-              <div className="py-8 text-center text-xs text-[#666] font-mono border border-white/5 rounded-xl bg-[#121212]/30">
-                No changelogs available from backend API.
-              </div>
-            )}
-          </div>
-        </div>
-      </main>
-
-      {/* BOTTOM ACTION BAR */}
-      <footer className="h-20 bg-[#121212] border-t border-[#222] flex items-center justify-between px-8">
-        <div className="flex items-center gap-5">
-          <div className="flex flex-col">
-            <span className="text-sm font-bold text-[#ccc]">Ready to inject</span>
-            <span className="text-[11px] font-mono text-[#666]">Authorized as {user.username} (ID: {user.id.substring(0, 8)}...)</span>
-          </div>
-
-          {/* Release channel toggle — shown only when the account has beta access */}
-          {user.beta_access && (
-            <div className="flex flex-col gap-1 no-drag">
-              <span className="text-[9px] uppercase font-mono tracking-wider text-[#555]">Channel</span>
-              <div className="flex items-center rounded-full bg-[#181818] border border-[#2a2a2a] p-0.5">
-                {(['stable', 'beta'] as const).map((ch) => (
-                  <button
-                    key={ch}
-                    onClick={() => changeChannel(ch)}
-                    disabled={switching}
-                    className={`px-3 py-1 rounded-full text-[10px] font-bold uppercase tracking-wide transition disabled:opacity-50 ${
-                      channel === ch
-                        ? ch === 'beta'
-                          ? 'bg-[#ff8c00] text-black shadow-[0_0_10px_rgba(255,140,0,0.25)]'
-                          : 'bg-[#2a2a2a] text-white'
-                        : 'text-[#888] hover:text-white'
-                    }`}
-                  >
-                    {ch}
-                  </button>
-                ))}
-              </div>
+                    <p
+                      className={`mt-1.5 whitespace-pre-line text-xs leading-relaxed ${
+                        latest
+                          ? 'rounded-lg border border-line bg-ink-1 px-3 py-2.5 text-fg-1'
+                          : 'text-fg-2'
+                      }`}
+                    >
+                      {item.content}
+                    </p>
+                  </li>
+                );
+              })}
+            </ol>
+          ) : (
+            <div className="rounded-lg border border-dashed border-line py-8 text-center text-xs text-fg-2">
+              No changelog entries yet.
             </div>
           )}
         </div>
+      </main>
+
+      {/* FOOTER: status, channel, launch */}
+      <footer className="flex h-[72px] shrink-0 items-center gap-4 border-t border-line bg-ink-1 px-6">
+        {/* Release channel toggle — shown only when the account has beta access */}
+        {user.beta_access && (
+          <div
+            role="radiogroup"
+            aria-label="Release channel"
+            className="no-drag ml-auto flex items-center rounded-full border border-line bg-ink-2 p-0.5"
+          >
+            {(['stable', 'beta'] as const).map((ch) => {
+              const selected = channel === ch;
+              return (
+                <button
+                  key={ch}
+                  type="button"
+                  role="radio"
+                  aria-checked={selected}
+                  onClick={() => changeChannel(ch)}
+                  disabled={switching}
+                  className={`rounded-full px-3 py-1 text-[11px] font-semibold capitalize transition disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent ${
+                    selected
+                      ? ch === 'beta'
+                        ? 'bg-accent text-accent-fg'
+                        : 'bg-ink-3 text-fg-0'
+                      : 'text-fg-2 hover:text-fg-0'
+                  }`}
+                >
+                  {ch}
+                </button>
+              );
+            })}
+          </div>
+        )}
 
         <button
-          onClick={() => {
-            if (activeApp) onLaunch(activeApp);
-          }}
-          className="flex items-center gap-2 bg-[#ff8c00] hover:bg-[#ffa02b] text-black font-extrabold text-xs tracking-wider uppercase py-2.5 px-7 rounded-full shadow-[0_0_15px_rgba(255,140,0,0.15)] transition-all active:scale-95"
+          type="button"
+          onClick={() => { if (activeApp) onLaunch(activeApp); }}
+          disabled={!canLaunch}
+          className={`${user.beta_access ? '' : 'ml-auto'} flex h-10 items-center gap-2 rounded-full bg-accent px-7 text-[13px] font-bold uppercase tracking-wide text-accent-fg shadow-[0_0_18px_rgba(255,140,0,0.25)] transition hover:bg-accent-hover active:scale-[0.97] disabled:cursor-not-allowed disabled:opacity-40 disabled:shadow-none focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-2 focus-visible:ring-offset-ink-1`}
         >
-          <Play className="w-3.5 h-3.5 fill-black" />
+          <Play className="size-3.5 fill-current" aria-hidden="true" />
           Launch
         </button>
       </footer>
-    </div>
+    </WindowShell>
   );
 };

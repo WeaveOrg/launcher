@@ -2,9 +2,34 @@
 @tailwind components;
 @tailwind utilities;
 
+/* Design tokens. The launcher is a fixed 720x450 dark window on Windows, so
+   there is a single (dark) theme. Values are RGB channels so Tailwind can add
+   opacity modifiers (`bg-accent/15`); use `rgb(var(--x))` in plain CSS.
+   Tailwind exposes them as `bg-ink-*`, `text-fg-*`, `border-line`, `bg-accent`,
+   etc. (see tailwind.config.ts). */
 :root {
-  --background: #090a10;
-  --foreground: #f1f5f9;
+  --ink-0: 11 11 13;   /* #0b0b0d */   /* window background */
+  --ink-1: 18 18 20;   /* #121214 */   /* header / footer / cards */
+  --ink-2: 26 26 30;   /* #1a1a1e */   /* raised controls */
+  --ink-3: 35 35 40;   /* #232328 */   /* hover */
+
+  --line: 35 35 40;   /* #232328 */
+  --line-strong: 47 47 54;   /* #2f2f36 */
+
+  --fg-0: 244 244 245;   /* #f4f4f5 */
+  --fg-1: 161 161 170;   /* #a1a1aa */
+  --fg-2: 107 107 116;   /* #6b6b74 */
+
+  --accent: 255 140 0;   /* #ff8c00 */
+  --accent-hover: 255 160 43;   /* #ffa02b */
+  --accent-fg: 20 11 0;   /* #140b00 */
+
+  --ok: 34 197 94;   /* #22c55e */
+  --warn: 245 158 11;   /* #f59e0b */
+  --danger: 244 63 94;   /* #f43f5e */
+
+  --background: rgb(var(--ink-0));
+  --foreground: rgb(var(--fg-0));
 }
 
 * {
@@ -15,62 +40,37 @@
 body {
   color: var(--foreground);
   background: var(--background);
-  font-family: 'Inter', system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  /* WebView2 on Windows: Segoe UI Variable is native on Win11 and needs no
+     download; the rest of the stack is the fallback for Win10. */
+  font-family: 'Segoe UI Variable Text', 'Segoe UI', 'Inter', system-ui, sans-serif;
   overflow: hidden;
   height: 100vh;
   width: 100vw;
   margin: 0;
   padding: 0;
+  -webkit-font-smoothing: antialiased;
 }
 
-/* Custom modern scrollbar */
+/* Scrollbar */
 ::-webkit-scrollbar {
   width: 6px;
   height: 6px;
 }
 
 ::-webkit-scrollbar-track {
-  background: rgba(10, 10, 16, 0.6);
+  background: transparent;
 }
 
 ::-webkit-scrollbar-thumb {
-  background: rgba(255, 140, 0, 0.3);
+  background: rgb(var(--line-strong));
   border-radius: 9999px;
 }
 
 ::-webkit-scrollbar-thumb:hover {
-  background: rgba(255, 140, 0, 0.6);
+  background: rgb(var(--fg-2));
 }
 
-/* Glassmorphism utility */
-.glass-panel {
-  background: rgba(20, 20, 20, 0.7);
-  backdrop-filter: blur(16px);
-  -webkit-backdrop-filter: blur(16px);
-  border: 1px solid rgba(255, 255, 255, 0.05);
-}
-
-.glass-panel-glow {
-  background: rgba(20, 20, 20, 0.75);
-  backdrop-filter: blur(20px);
-  -webkit-backdrop-filter: blur(20px);
-  border: 1px solid rgba(255, 140, 0, 0.3);
-  box-shadow: 0 0 25px rgba(255, 140, 0, 0.15);
-}
-
-.glass-button {
-  background: rgba(255, 255, 255, 0.05);
-  border: 1px solid rgba(255, 255, 255, 0.1);
-  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
-}
-
-.glass-button:hover {
-  background: rgba(255, 255, 255, 0.12);
-  border-color: rgba(255, 140, 0, 0.5);
-  box-shadow: 0 0 15px rgba(255, 140, 0, 0.25);
-}
-
-/* Draggable titlebar area for Frameless Saucer Window */
+/* Draggable titlebar area for the frameless Saucer window */
 .drag-region {
   -webkit-app-region: drag;
   app-region: drag;

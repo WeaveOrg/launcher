@@ -102,8 +102,6 @@ function MainLauncherContent() {
         user={user}
         token={token}
         changelogs={changelogs}
-        onlineCount={4892}
-        ping={16}
         onLaunch={(app) => setActiveLaunchApp(app)}
         onLogout={handleLogout}
         onChannelChanged={handleChannelChanged}

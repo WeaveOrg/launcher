@@ -1,9 +1,11 @@
 'use client';
 
 import React, { useState, useEffect, useCallback } from 'react';
-import { ShieldAlert, Loader2, X, Minus, KeyRound, RefreshCw, AlertCircle } from 'lucide-react';
+import { ShieldAlert, Loader2, RefreshCw, AlertCircle } from 'lucide-react';
 import { ipc, LauncherProfile } from '@/lib/ipc';
 import { motion } from 'framer-motion';
+import { WeaveMark } from './WeaveMark';
+import { TitleBar, WindowShell } from './WindowChrome';
 
 interface AuthScreenProps {
   initialToken?: string | null;
@@ -92,108 +94,90 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ initialToken, onSuccess 
     }
   }, [initialToken, verifyToken]);
 
-  return (
-    <div className="flex flex-col h-screen w-screen bg-[#0d0d0d] text-[#ddd] font-sans selection:bg-[#ff8c00] selection:text-black">
-      {/* DRAG HEADER */}
-      <header
-        onMouseDown={(e) => {
-          if ((e.target as HTMLElement).closest('.no-drag')) return;
-          ipc.startDrag();
-        }}
-        className="h-10 flex items-center justify-between px-4 drag-region select-none border-b border-[#1c1c1c]"
-      >
-        <div className="flex items-center gap-2 text-xs font-mono text-[#666]">
-          <KeyRound className="w-3.5 h-3.5 text-[#ff8c00]" />
-          <span>WEAVE LAUNCHER AUTH</span>
-        </div>
-        <div className="flex items-center gap-1 no-drag">
-          <button
-            onClick={() => ipc.minimize()}
-            className="w-6 h-6 flex items-center justify-center text-[#666] hover:text-white hover:bg-[#222] rounded transition"
-          >
-            <Minus className="w-3.5 h-3.5" />
-          </button>
-          <button
-            onClick={() => ipc.close()}
-            className="w-6 h-6 flex items-center justify-center text-[#666] hover:text-white hover:bg-red-500/20 hover:text-red-400 rounded transition"
-          >
-            <X className="w-3.5 h-3.5" />
-          </button>
-        </div>
-      </header>
+  const resolveToken = () => {
+    const urlParams = typeof window !== 'undefined' ? new URLSearchParams(window.location.search) : null;
+    const qToken = urlParams?.get('token') || urlParams?.get('launcher_token');
+    return currentToken || initialToken || qToken || (typeof window !== 'undefined' ? localStorage.getItem('launcher_token') : null);
+  };
+  // Without a token there is nothing to retry — the launcher has to be
+  // restarted from the site — so only offer Retry when one exists.
+  const canRetry = Boolean(resolveToken());
+  const retry = () => {
+    const t = resolveToken();
+    if (t) verifyToken(t);
+  };
 
-      {/* MAIN AUTH / STATUS CENTER */}
-      <main className="flex-1 flex items-center justify-center p-6 overflow-y-auto">
+  return (
+    <WindowShell>
+      <TitleBar>
+        <WeaveMark width={30} className="shrink-0 text-accent" />
+        <span className="text-sm font-semibold text-fg-0">Weave Launcher</span>
+      </TitleBar>
+
+      <main className="flex flex-1 items-center justify-center overflow-y-auto px-8">
         <motion.div
-          initial={{ opacity: 0, y: 10, scale: 0.95 }}
-          animate={{ opacity: 1, y: 0, scale: 1 }}
-          className="w-full max-w-md flex flex-col items-center gap-5"
+          initial={{ opacity: 0, y: 8 }}
+          animate={{ opacity: 1, y: 0 }}
+          className="flex w-full max-w-md flex-col items-center gap-5"
         >
           {loading ? (
-            <div className="flex flex-col items-center gap-5 py-8">
-              <Loader2 className="w-10 h-10 text-[#ff8c00] animate-spin" />
-              <div className="text-center space-y-1">
-                <h1 className="text-base font-bold text-white tracking-wider uppercase">Verifying Launcher Session</h1>
-                <p className="text-xs text-[#666] font-mono">Checking authorization with backend...</p>
+            <div role="status" className="flex flex-col items-center gap-4 py-8">
+              <Loader2 className="size-8 animate-spin text-accent" aria-hidden="true" />
+              <div className="space-y-1 text-center">
+                <h1 className="text-base font-semibold text-fg-0">Checking your session</h1>
+                <p className="text-xs text-fg-2">Contacting the Weave backend…</p>
               </div>
             </div>
           ) : error ? (
             <motion.div
-              initial={{ opacity: 0, scale: 0.9 }}
+              initial={{ opacity: 0, scale: 0.96 }}
               animate={{ opacity: 1, scale: 1 }}
-              className="w-full flex flex-col items-center gap-4 text-center"
+              className="flex w-full flex-col items-center gap-4 text-center"
             >
-              {/* Alert Badge */}
-              <div className="w-14 h-14 rounded-2xl bg-rose-500/10 border border-rose-500/30 flex items-center justify-center text-rose-500 shadow-[0_0_20px_rgba(244,63,94,0.15)]">
-                <ShieldAlert className="w-7 h-7" />
-              </div>
+              <span className="flex size-14 items-center justify-center rounded-2xl border border-danger/30 bg-danger/10 text-danger">
+                <ShieldAlert className="size-6" aria-hidden="true" />
+              </span>
 
-              <div className="space-y-1">
-                <h1 className="text-lg font-black text-white tracking-wider uppercase">{error}</h1>
+              <div className="flex flex-col gap-1">
+                <h1 className="text-lg font-semibold text-fg-0">{error}</h1>
                 {errorDetails?.message && (
-                  <p className="text-xs text-rose-400 max-w-sm font-mono leading-relaxed">
-                    {errorDetails.message}
-                  </p>
+                  <p className="max-w-sm text-xs leading-relaxed text-fg-1">{errorDetails.message}</p>
                 )}
               </div>
 
-              {/* Error Details Card */}
-              {errorDetails && (
-                <div className="w-full bg-[#121212] border border-[#222] rounded-xl p-3.5 text-left text-xs font-mono space-y-2">
-                  {errorDetails.status && (
-                    <div className="flex items-center justify-between border-b border-[#222] pb-1.5">
-                      <span className="text-[#666]">HTTP Status:</span>
-                      <span className="font-bold text-rose-400 px-1.5 py-0.5 rounded bg-rose-950/60 border border-rose-500/30 text-[10px]">
-                        {errorDetails.status}
-                      </span>
-                    </div>
-                  )}
-                  {errorDetails.hint && (
-                    <div className="flex gap-2 text-[11px] text-[#888] leading-relaxed">
-                      <AlertCircle className="w-3.5 h-3.5 text-amber-500 shrink-0 mt-0.5" />
-                      <span>{errorDetails.hint}</span>
-                    </div>
-                  )}
+              {errorDetails && (errorDetails.hint || errorDetails.status) && (
+                <div className="flex w-full items-start gap-2.5 rounded-lg border border-line bg-ink-1 px-3.5 py-3 text-left">
+                  <AlertCircle className="mt-px size-3.5 shrink-0 text-warn" aria-hidden="true" />
+                  <div className="flex min-w-0 flex-1 flex-col gap-1">
+                    {errorDetails.hint && (
+                      <p className="text-xs leading-relaxed text-fg-1">{errorDetails.hint}</p>
+                    )}
+                    {errorDetails.status && (
+                      <p className="font-mono text-[11px] text-fg-2">HTTP {errorDetails.status}</p>
+                    )}
+                  </div>
                 </div>
               )}
 
-              {/* Action Buttons */}
-              <div className="flex gap-2 mt-2 w-full">
+              <div className="mt-1 flex w-full gap-2">
+                {canRetry && (
+                  <button
+                    type="button"
+                    onClick={retry}
+                    className="flex h-10 flex-1 items-center justify-center gap-2 rounded-full bg-accent text-[13px] font-bold uppercase tracking-wide text-accent-fg transition hover:bg-accent-hover active:scale-[0.97] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-2 focus-visible:ring-offset-ink-0"
+                  >
+                    <RefreshCw className="size-3.5" aria-hidden="true" />
+                    Retry
+                  </button>
+                )}
                 <button
-                  onClick={() => {
-                    const urlParams = typeof window !== 'undefined' ? new URLSearchParams(window.location.search) : null;
-                    const qToken = urlParams?.get('token') || urlParams?.get('launcher_token');
-                    const t = currentToken || initialToken || qToken || (typeof window !== 'undefined' ? localStorage.getItem('launcher_token') : null);
-                    if (t) verifyToken(t);
-                  }}
-                  className="flex-1 py-2.5 bg-[#1a1a1a] hover:bg-[#252525] border border-[#333] text-white text-xs font-bold uppercase tracking-wider rounded-xl transition flex items-center justify-center gap-1.5 active:scale-95"
-                >
-                  <RefreshCw className="w-3 h-3 text-[#ff8c00]" />
-                  Retry
-                </button>
-                <button
+                  type="button"
                   onClick={() => ipc.close()}
-                  className="py-2.5 px-5 bg-rose-600/10 hover:bg-rose-600/20 border border-rose-500/30 text-rose-300 text-xs font-bold uppercase tracking-wider rounded-xl transition active:scale-95"
+                  className={`h-10 rounded-full text-[13px] font-semibold transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent ${
+                    canRetry
+                      ? 'border border-line-strong bg-ink-2 px-5 text-fg-1 hover:bg-ink-3 hover:text-fg-0'
+                      : 'flex-1 bg-accent uppercase tracking-wide text-accent-fg hover:bg-accent-hover active:scale-[0.97]'
+                  }`}
                 >
                   Exit
                 </button>
@@ -202,6 +186,6 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ initialToken, onSuccess 
           ) : null}
         </motion.div>
       </main>
-    </div>
+    </WindowShell>
   );
 };

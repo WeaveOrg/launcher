@@ -1,9 +1,13 @@
 'use client';
 
 import { useState } from 'react';
-import { ArrowUpRight, CircleAlert, Minus, X } from 'lucide-react';
+import { ArrowUpRight, Download } from 'lucide-react';
 import { ipc } from '@/lib/ipc';
+import { WeaveMark } from './WeaveMark';
+import { TitleBar, WindowShell } from './WindowChrome';
 
+// Mandatory update gate: this build is no longer accepted by the backend, so
+// the only way forward is the dashboard download.
 export function LegacyLauncherNotice() {
   const [openingDashboard, setOpeningDashboard] = useState(false);
   const [openFailed, setOpenFailed] = useState(false);
@@ -23,76 +27,56 @@ export function LegacyLauncherNotice() {
   };
 
   return (
-    <div className="flex h-screen w-screen flex-col bg-[#0d0d0d] font-sans text-[#ddd] selection:bg-[#ff8c00] selection:text-black">
-      <header
-        onMouseDown={(event) => {
-          if ((event.target as HTMLElement).closest('.no-drag')) return;
-          ipc.startDrag();
-        }}
-        className="drag-region flex h-14 shrink-0 select-none items-center border-b border-[#222] bg-[#121212] px-4"
-      >
-        <span className="text-sm font-bold tracking-wide text-white">Launcher update</span>
-        <div className="no-drag ml-auto flex items-center gap-1">
-          <button
-            type="button"
-            onClick={() => ipc.minimize()}
-            className="flex size-7 items-center justify-center rounded text-[#666] transition hover:bg-[#222] hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#ff8c00]"
-            aria-label="Minimize launcher"
-          >
-            <Minus className="size-4" aria-hidden="true" />
-          </button>
-          <button
-            type="button"
-            onClick={() => ipc.close()}
-            className="flex size-7 items-center justify-center rounded text-[#666] transition hover:bg-red-500/20 hover:text-red-400 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-400"
-            aria-label="Close launcher"
-          >
-            <X className="size-4" aria-hidden="true" />
-          </button>
-        </div>
-      </header>
+    <WindowShell>
+      <TitleBar>
+        <WeaveMark width={30} className="shrink-0 text-accent" />
+        <span className="text-sm font-semibold text-fg-0">Weave Launcher</span>
+      </TitleBar>
 
-      <main className="flex-1 overflow-y-auto px-6 py-5">
-        <div className="flex items-center gap-2 text-base font-bold tracking-wide text-white">
-          <CircleAlert className="size-4 text-[#ff8c00]" aria-hidden="true" />
-          <h1>Update required</h1>
-        </div>
+      <main className="flex flex-1 items-center justify-center px-8">
+        <section
+          aria-labelledby="launcher-update-title"
+          className="flex w-full max-w-md flex-col items-center gap-5 text-center"
+        >
+          <span className="flex size-14 items-center justify-center rounded-2xl border border-accent/30 bg-accent/10 text-accent">
+            <Download className="size-6" aria-hidden="true" />
+          </span>
 
-        <section className="relative mt-6 max-w-3xl pl-8" aria-labelledby="launcher-update-message">
-          <div className="absolute bottom-[-30px] left-[10px] top-[20px] w-0.5 bg-[#222]" aria-hidden="true" />
-          <div className="absolute left-[5px] top-[4px] size-3 rotate-45 bg-[#ff8c00] shadow-[0_0_10px_rgba(255,140,0,0.55)]" aria-hidden="true" />
-
-          <h2 id="launcher-update-message" className="font-mono text-sm font-bold text-[#f5f1e8]">
-            Please update the launcher
-          </h2>
-          <p className="mt-2 max-w-xl text-xs leading-relaxed text-[#aaa]">
-            This version is no longer supported. Open the dashboard to download the current launcher and continue.
-          </p>
-
-          <div className="mt-4 max-w-xl rounded-lg border border-[#292929] bg-[#121212] p-4">
-            <p className="text-xs font-semibold text-[#ebe6dc]">Update required to continue</p>
-            <p className="mt-1 text-[11px] text-[#777]">The launcher will remain unavailable until it is updated.</p>
+          <div className="flex flex-col gap-1.5">
+            <h1 id="launcher-update-title" className="text-lg font-semibold text-fg-0">
+              Update required
+            </h1>
+            <p className="text-xs leading-relaxed text-fg-1">
+              This launcher build is no longer supported. Download the current version from the dashboard to continue.
+            </p>
           </div>
 
-          <button
-            type="button"
-            onClick={openDashboard}
-            disabled={openingDashboard}
-            className="mt-4 inline-flex min-h-10 items-center gap-2 rounded-md border border-[#3b3b3b] bg-[#171717] px-4 text-[11px] font-bold uppercase tracking-wide text-[#e8e3da] transition hover:border-[#555] hover:bg-[#202020] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#ff8c00] disabled:cursor-wait disabled:opacity-60"
-          >
-            <ArrowUpRight className="size-3.5 text-[#ff8c00]" aria-hidden="true" />
-            {openingDashboard ? 'Opening dashboard...' : 'Go to dashboard'}
-          </button>
+          <div className="flex w-full flex-col items-center gap-2">
+            <button
+              type="button"
+              onClick={openDashboard}
+              disabled={openingDashboard}
+              className="flex h-10 w-full max-w-xs items-center justify-center gap-2 rounded-full bg-accent text-[13px] font-bold uppercase tracking-wide text-accent-fg shadow-[0_0_18px_rgba(255,140,0,0.25)] transition hover:bg-accent-hover active:scale-[0.97] disabled:cursor-wait disabled:opacity-60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-2 focus-visible:ring-offset-ink-0"
+            >
+              <ArrowUpRight className="size-4" aria-hidden="true" />
+              {openingDashboard ? 'Opening dashboard…' : 'Open dashboard'}
+            </button>
+            <button
+              type="button"
+              onClick={() => ipc.close()}
+              className="h-8 rounded-full px-4 text-xs font-medium text-fg-2 transition hover:text-fg-0 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"
+            >
+              Exit
+            </button>
+          </div>
 
           {openFailed && (
-            <p className="mt-3 text-xs text-red-400" role="alert">
+            <p className="text-xs text-danger" role="alert">
               Could not open the dashboard. Please try again.
             </p>
           )}
         </section>
       </main>
-
-      <footer className="h-20 shrink-0 border-t border-[#222] bg-[#121212]" aria-hidden="true" />
-    </div>
+    </WindowShell>
   );
 }

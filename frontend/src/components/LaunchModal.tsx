@@ -4,6 +4,7 @@ import React, { useState, useEffect } from 'react';
 import { CheckCircle2, AlertCircle, Cpu } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { AppItem, ipc } from '@/lib/ipc';
+import { WeaveTile } from './WeaveMark';
 
 interface LaunchModalProps {
   app: AppItem | null;
@@ -45,7 +46,7 @@ export const LaunchModal: React.FC<LaunchModalProps> = ({ app, token, onClose, o
       if (!mounted) return;
       if (res.success) {
         setStatus('success');
-        setPhase({ stage: 'Payload injected into CS2!', progress: 100 });
+        setPhase({ stage: `Payload injected into ${app.processName}`, progress: 100 });
         setCountdown(3);
 
         const interval = setInterval(() => {
@@ -83,31 +84,33 @@ export const LaunchModal: React.FC<LaunchModalProps> = ({ app, token, onClose, o
           initial={{ opacity: 0 }}
           animate={{ opacity: 1 }}
           exit={{ opacity: 0 }}
-          className="fixed inset-0 z-[100] flex items-center justify-center bg-black/85 backdrop-blur-sm p-4"
+          className="fixed inset-0 z-[100] flex items-center justify-center bg-black/80 p-4 backdrop-blur-sm"
         >
           <motion.div
             initial={{ opacity: 0, scale: 0.9, y: 10 }}
             animate={{ opacity: 1, scale: 1, y: 0 }}
             exit={{ opacity: 0, scale: 0.95, y: -10 }}
             transition={{ type: 'spring', damping: 25, stiffness: 300 }}
-            className="w-full max-w-sm bg-[#121212] border border-[#2a2a2a] rounded-2xl p-6 shadow-2xl shadow-black flex flex-col items-center gap-5 text-center select-none"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="launch-title"
+            className="flex w-full max-w-sm select-none flex-col items-center gap-5 rounded-2xl border border-line bg-ink-1 p-6 text-center shadow-2xl shadow-black"
           >
+            {app.banner ? (
+              <div className="flex h-12 w-20 items-center justify-center overflow-hidden rounded-xl border border-line bg-ink-2">
+                <img src={app.banner} alt="" className="size-full object-cover" onError={(e) => { e.currentTarget.style.display = 'none'; }} />
+              </div>
+            ) : (
+              <WeaveTile size={48} />
+            )}
 
-            {/* Game Icon */}
-            <div className="w-20 h-12 rounded-xl bg-[#1a1a1a] border border-[#333] flex items-center justify-center overflow-hidden shadow-lg shadow-black/50">
-              <img
-                src="https://cdn.akamai.steamstatic.com/steam/apps/730/header.jpg"
-                alt={app.name}
-                className="w-full h-full object-cover"
-                onError={(e) => { e.currentTarget.style.display = 'none'; }}
-              />
-            </div>
-
-            {/* Title */}
             <div className="flex flex-col gap-0.5">
-              <h2 className="text-lg font-extrabold text-white tracking-wide">
-                {isSuccess ? 'Injection Complete' : `Injecting ${app.name}`}
+              <h2 id="launch-title" className="text-base font-semibold text-fg-0">
+                {isSuccess ? 'Ready' : isError ? 'Launch failed' : `Launching ${app.name}`}
               </h2>
+              {!isSuccess && !isError && (
+                <p className="text-[11px] text-fg-2">Keep the launcher open until {app.processName} is ready.</p>
+              )}
             </div>
 
             {/* Unified progress */}
@@ -115,26 +118,32 @@ export const LaunchModal: React.FC<LaunchModalProps> = ({ app, token, onClose, o
               <div className="w-full flex flex-col gap-1.5">
                 <div className="flex items-center justify-between px-0.5">
                   <div className="flex items-center gap-1.5">
-                    <Cpu className={`w-3 h-3 ${isError ? 'text-rose-400' : isSuccess ? 'text-emerald-400' : 'text-[#ff8c00]'}`} />
-                    <span className="text-[10px] font-semibold text-[#666] uppercase tracking-wider">Launch progress</span>
+                    <Cpu className={`size-3 ${isError ? 'text-danger' : isSuccess ? 'text-ok' : 'text-accent'}`} aria-hidden="true" />
+                    <span className="text-[10px] font-semibold uppercase tracking-wider text-fg-2">Progress</span>
                   </div>
-                  <span className={`text-[10px] font-bold tabular-nums ${
-                    isError ? 'text-rose-400' : isSuccess ? 'text-emerald-400' : 'text-[#ff8c00]'
+                  <span className={`font-mono text-[11px] font-semibold tabular-nums ${
+                    isError ? 'text-danger' : isSuccess ? 'text-ok' : 'text-accent'
                   }`}>
                     {phase.progress}%
                   </span>
                 </div>
-                <div className="w-full h-1.5 bg-[#1e1e1e] rounded-full overflow-hidden relative">
+                <div
+                  role="progressbar"
+                  aria-valuemin={0}
+                  aria-valuemax={100}
+                  aria-valuenow={phase.progress}
+                  className="relative h-1.5 w-full overflow-hidden rounded-full bg-ink-3"
+                >
                   <motion.div
                     initial={{ width: 0 }}
                     animate={{ width: `${phase.progress}%` }}
                     transition={{ ease: 'easeOut', duration: 0.3 }}
                     className={`absolute top-0 bottom-0 left-0 rounded-full ${
                       isError
-                        ? 'bg-rose-500 shadow-[0_0_6px_#f43f5e]'
+                        ? 'bg-danger'
                         : isSuccess || phase.progress === 100
-                        ? 'bg-emerald-500 shadow-[0_0_8px_#10b981]'
-                        : 'bg-[#ff8c00] shadow-[0_0_6px_#ff8c00]'
+                        ? 'bg-ok'
+                        : 'bg-accent shadow-[0_0_6px_rgb(var(--accent))]'
                     }`}
                   />
                 </div>
@@ -142,8 +151,8 @@ export const LaunchModal: React.FC<LaunchModalProps> = ({ app, token, onClose, o
                   key={phase.stage}
                   initial={{ opacity: 0, y: 1 }}
                   animate={{ opacity: 1, y: 0 }}
-                  className={`text-[10px] font-mono text-left truncate ${
-                    isError ? 'text-rose-400 font-medium' : phase.progress === 100 ? 'text-emerald-400' : 'text-[#555]'
+                  className={`truncate text-left text-[11px] ${
+                    isError ? 'text-danger' : phase.progress === 100 ? 'text-ok' : 'text-fg-1'
                   }`}
                 >
                   {isError ? 'Injection stopped due to an error' : phase.stage}
@@ -153,25 +162,25 @@ export const LaunchModal: React.FC<LaunchModalProps> = ({ app, token, onClose, o
 
             {/* Status Label (only on success or error) */}
             {(isSuccess || isError) && (
-              <div className={`w-full flex items-start gap-2.5 mt-1 px-3 py-2.5 rounded-xl text-left ${
-                isError ? 'bg-rose-500/10 border border-rose-500/20' : 'bg-emerald-500/10 border border-emerald-500/20'
+              <div className={`mt-1 flex w-full items-start gap-2.5 rounded-xl px-3 py-2.5 text-left ${
+                isError ? 'border border-danger/25 bg-danger/10' : 'border border-ok/25 bg-ok/10'
               }`}>
                 {isSuccess && (
                   <motion.div initial={{ scale: 0 }} animate={{ scale: 1 }} className="shrink-0 mt-0.5">
-                    <CheckCircle2 className="w-4 h-4 text-emerald-400" />
+                    <CheckCircle2 className="size-4 text-ok" aria-hidden="true" />
                   </motion.div>
                 )}
                 {isError && (
                   <motion.div initial={{ scale: 0 }} animate={{ scale: 1 }} className="shrink-0 mt-0.5">
-                    <AlertCircle className="w-4 h-4 text-rose-500" />
+                    <AlertCircle className="size-4 text-danger" aria-hidden="true" />
                   </motion.div>
                 )}
                 <motion.span
                   key={isSuccess ? 'success' : 'error'}
                   initial={{ opacity: 0, y: 2 }}
                   animate={{ opacity: 1, y: 0 }}
-                  className={`text-xs font-medium break-words leading-relaxed select-text ${
-                    isError ? 'text-rose-400 font-mono text-[11px]' : 'text-emerald-400 font-semibold'
+                  className={`select-text break-words text-xs leading-relaxed ${
+                    isError ? 'font-mono text-[11px] text-danger' : 'font-medium text-ok'
                   }`}
                 >
                   {isSuccess
@@ -182,21 +191,6 @@ export const LaunchModal: React.FC<LaunchModalProps> = ({ app, token, onClose, o
                 </motion.span>
               </div>
             )}
-
-            {/* Dismiss on error */}
-            <AnimatePresence>
-              {isError && (
-                <motion.button
-                  initial={{ opacity: 0, height: 0, marginTop: 0 }}
-                  animate={{ opacity: 1, height: 'auto', marginTop: 8 }}
-                  exit={{ opacity: 0, height: 0, marginTop: 0 }}
-                  onClick={onClose}
-                  className="px-6 py-2 bg-[#222] hover:bg-[#333] text-white rounded-full text-xs font-bold transition"
-                >
-                  Dismiss
-                </motion.button>
-              )}
-            </AnimatePresence>
           </motion.div>
         </motion.div>
       )}

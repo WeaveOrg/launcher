@@ -14,7 +14,7 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="en" className="dark">
-      <body className="bg-[#0a0a0f] text-slate-100 antialiased select-none overflow-hidden h-screen w-screen border border-purple-500/20 rounded-xl">
+      <body className="h-screen w-screen select-none overflow-hidden bg-ink-0 text-fg-0 antialiased">
         <ZoomLock />
         {children}
       </body>
