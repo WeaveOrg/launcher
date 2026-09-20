@@ -6,6 +6,7 @@ import { LaunchModal } from '@/components/LaunchModal';
 import { LauncherRedesign } from '@/components/LauncherRedesign';
 import { LegacyLauncherNotice } from '@/components/LegacyLauncherNotice';
 import { AuthScreen } from '@/components/AuthScreen';
+import { Splash } from '@/components/Splash';
 import { ipc, AppItem, LauncherProfile, ChangelogItem } from '@/lib/ipc';
 import { MOCK_ENABLED, mockParam } from '@/lib/mock';
 
@@ -119,11 +120,7 @@ function MainLauncherContent() {
 
 export default function Home() {
   return (
-    <Suspense fallback={
-      <div className="flex h-screen w-screen items-center justify-center bg-[#0d0d0d] text-white">
-        <span className="text-xs font-mono text-[#666]">INITIALIZING WEAVE...</span>
-      </div>
-    }>
+    <Suspense fallback={<Splash />}>
       <MainLauncherContent />
     </Suspense>
   );

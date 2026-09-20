@@ -1,11 +1,12 @@
 'use client';
 
 import React, { useState, useEffect, useCallback } from 'react';
-import { ShieldAlert, Loader2, RefreshCw, AlertCircle } from 'lucide-react';
+import { ShieldAlert, RefreshCw, AlertCircle } from 'lucide-react';
 import { ipc, LauncherProfile } from '@/lib/ipc';
 import { motion } from 'framer-motion';
 import { WeaveMark } from './WeaveMark';
 import { TitleBar, WindowShell } from './WindowChrome';
+import { Splash } from './Splash';
 
 interface AuthScreenProps {
   initialToken?: string | null;
@@ -107,6 +108,10 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ initialToken, onSuccess 
     if (t) verifyToken(t);
   };
 
+  if (loading) {
+    return <Splash label="Checking your session" />;
+  }
+
   return (
     <WindowShell>
       <TitleBar>
@@ -120,15 +125,7 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ initialToken, onSuccess 
           animate={{ opacity: 1, y: 0 }}
           className="flex w-full max-w-md flex-col items-center gap-5"
         >
-          {loading ? (
-            <div role="status" className="flex flex-col items-center gap-4 py-8">
-              <Loader2 className="size-8 animate-spin text-accent" aria-hidden="true" />
-              <div className="space-y-1 text-center">
-                <h1 className="text-base font-semibold text-fg-0">Checking your session</h1>
-                <p className="text-xs text-fg-2">Contacting the Weave backend…</p>
-              </div>
-            </div>
-          ) : error ? (
+          {error ? (
             <motion.div
               initial={{ opacity: 0, scale: 0.96 }}
               animate={{ opacity: 1, scale: 1 }}

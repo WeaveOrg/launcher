@@ -9,8 +9,13 @@ const BACKEND_BASE_URL =
 
 export async function GET(request: NextRequest) {
   if (MOCK_ENABLED) {
-    // `?token=stale` renders the mandatory-update gate.
-    const stale = request.nextUrl.searchParams.get('token') === 'stale';
+    // `?token=stale` renders the mandatory-update gate; `?token=slow` holds
+    // the response so the splash screen can be inspected.
+    const token = request.nextUrl.searchParams.get('token');
+    if (token === 'slow') {
+      await new Promise((r) => setTimeout(r, 60_000));
+    }
+    const stale = token === 'stale';
     return NextResponse.json(
       stale
         ? { ...mockProfile, launcher_downloaded_version: '1.3.0', launcher_update_required: true }

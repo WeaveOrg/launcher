@@ -80,3 +80,21 @@ body {
   -webkit-app-region: no-drag;
   app-region: no-drag;
 }
+
+/* Splash (Splash.tsx): indeterminate bar */
+.splash-bar > span {
+  animation: splash-sweep 1.4s cubic-bezier(0.65, 0, 0.35, 1) infinite;
+}
+
+@keyframes splash-sweep {
+  0% { transform: translateX(-100%); }
+  100% { transform: translateX(300%); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .splash-bar > span {
+    animation: none;
+    width: 100%;
+    opacity: 0.6;
+  }
+}
