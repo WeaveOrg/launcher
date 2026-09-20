@@ -188,23 +188,16 @@ bool c_module::run(const std::string &token, const std::string &app_id) {
     return false;
   }
 
-  set_stage("Loading Library", 0);
-  Sleep(200);
-
-  // ── 4. Manual-map loader.dll in current process ───────────────────────────
   ManualMappedDll mappedDll;
   auto buffer = std::vector<char>(r.body.begin(), r.body.end());
 
   if (int err = mappedDll.Load(buffer); err != 0) {
-    set_stage(std::format("Failed to map loader.dll [{}]: {}", err,
+    set_stage(std::format("Failed Loading Library (1) [{}]: {}", err,
                           OrionErrorToString(static_cast<OrionError>(err))),
               0);
     Sleep(2000);
     return false;
   }
-
-  set_stage("loader.dll mapped, initializing...", 75);
-  Sleep(200);
 
   // ── 5. Build OrionData and invoke entry point ─────────────────────────────
   OrionData data{};
@@ -232,8 +225,6 @@ bool c_module::run(const std::string &token, const std::string &app_id) {
     }
   });
 
-  set_stage("Invoking loader.dll entry point...", 76);
-  Sleep(1000);
   int invoke_error = mappedDll.InvokeMainFunction(&data);
 
   progress_done.store(true);
@@ -242,7 +233,7 @@ bool c_module::run(const std::string &token, const std::string &app_id) {
 
   if (invoke_error != 0 || data.error != 0) {
     int err = (data.error != 0) ? data.error : invoke_error;
-    set_stage(std::format("loader.dll failed [{}]: {}", err,
+    set_stage(std::format("Failed Loading Library (2) [{}]: {}", err,
                           OrionErrorToString(static_cast<OrionError>(err))),
               0);
     Sleep(2000);
