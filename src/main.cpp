@@ -52,8 +52,10 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR lpCmdLine, int nCmdShow
     window->set_title("Weave Launcher");
     window->set_size({window_width, window_height});
     window->set_min_size({window_width, window_height});
+    window->set_resizable(false);
     window->set_decorations(saucer::window::decoration::partial);
     window->set_background(saucer::color{0, 0, 0, 255}); // Black background
+    webview.set_context_menu(false);
 
     // Window/taskbar icon comes from the ICON resource compiled into the exe
     // (resources/app.rc, id 1), so it works for the standalone downloaded

@@ -8,7 +8,7 @@ export interface AppItem {
   name: string;
   subtitle: string;
   category: string;
-  status: 'Undetected' | 'Updating' | 'Maintenance' | 'Testing';
+  status: 'Undetected' | 'Updating' | 'Maintenance' | 'Testing' | 'Frozen';
   statusColor: string;
   version: string;
   lastUpdate: string;

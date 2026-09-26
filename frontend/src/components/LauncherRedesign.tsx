@@ -63,7 +63,7 @@ export const LauncherRedesign: React.FC<LauncherRedesignProps> = ({
   };
 
   const activeApp: AppItem | null = safeApps.length > 0 ? safeApps[0] : null;
-  const canLaunch = Boolean(activeApp) && activeApp?.status !== 'Maintenance';
+  const canLaunch = Boolean(activeApp) && activeApp?.status !== 'Maintenance' && activeApp?.status !== 'Frozen';
 
   return (
     <WindowShell>
@@ -148,6 +148,11 @@ export const LauncherRedesign: React.FC<LauncherRedesignProps> = ({
 
       {/* FOOTER: status, channel, launch */}
       <footer className="flex h-[72px] shrink-0 items-center gap-4 border-t border-line bg-ink-1 px-6">
+        {activeApp?.status === 'Frozen' && (
+          <span className="rounded-full border border-amber-500/30 bg-amber-500/10 px-3 py-1 text-[11px] font-semibold text-amber-300">
+            Subscription frozen · cannot launch
+          </span>
+        )}
         {/* Release channel toggle — shown only when the account has beta access */}
         {user.beta_access && (
           <div

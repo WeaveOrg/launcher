@@ -98,6 +98,7 @@ export const LibraryView: React.FC<LibraryViewProps> = ({
       <div className="flex-1 overflow-y-auto pr-1 grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-5">
         {filteredApps.map((app) => {
           const isUndetected = app.status === 'Undetected';
+          const isFrozen = app.status === 'Frozen';
           return (
             <div
               key={app.id}
@@ -118,7 +119,7 @@ export const LibraryView: React.FC<LibraryViewProps> = ({
                     className="w-2 h-2 rounded-full"
                     style={{ backgroundColor: app.statusColor }}
                   />
-                  <span>{app.status}</span>
+                  <span>{isFrozen ? 'Frozen' : app.status}</span>
                 </div>
 
                 {/* Category Tag */}
@@ -181,7 +182,7 @@ export const LibraryView: React.FC<LibraryViewProps> = ({
                     }`}
                   >
                     <Play className="w-3.5 h-3.5 fill-current" />
-                    <span>{isUndetected ? 'LAUNCH' : 'UPDATING'}</span>
+                    <span>{isUndetected ? 'LAUNCH' : isFrozen ? 'FROZEN' : app.status === 'Maintenance' ? 'UNAVAILABLE' : 'UPDATING'}</span>
                   </button>
                 </div>
               </div>
