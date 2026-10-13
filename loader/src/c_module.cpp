@@ -21,45 +21,55 @@
 // CDN authorities
 // ---------------------------------------------------------------------------
 
+static constexpr const char *LAUNCHER_API_AUTHORITY = "https://launcher.weave.su";
+static constexpr const char *CDN_AUTHORITY_RU = "https://cdn.orion-security.su";
+static constexpr const char *CDN_AUTHORITY_DEFAULT = "https://cdn.orion-security.pro";
+
 static bool is_russian_language() {
+  // Only the UI language the user reads counts. Regional format and system
+  // locale can be Russian while the UI is not (e.g. ru-RU format, en-US UI),
+  // so they must not pick the .su CDN.
   const LANGID ui_lang = GetUserDefaultUILanguage();
-  if (PRIMARYLANGID(ui_lang) == LANG_RUSSIAN)
-    return true;
+  return PRIMARYLANGID(ui_lang) == LANG_RUSSIAN;
+}
 
-  const LANGID sys_lang = GetSystemDefaultUILanguage();
-  if (PRIMARYLANGID(sys_lang) == LANG_RUSSIAN)
-    return true;
+// Asks the launcher backend which CDN fits this client's IP. Returns an empty
+// string on any failure so the caller can fall back to the UI language.
+static std::string fetch_cdn_authority_by_ip() {
+  http2client::Http2ClientOptions opts;
+  opts.protocol = http2client::HttpProtocol::kAuto;
+  opts.connect_timeout = 3000;
+  http2client::EasyClient api(LAUNCHER_API_AUTHORITY, opts);
+  api.Timeout(3000);
 
-  const LANGID user_lang = GetUserDefaultLangID();
-  if (PRIMARYLANGID(user_lang) == LANG_RUSSIAN)
-    return true;
+  auto r = api.Get("/api/launcher/cdn");
+  if (!r.ok() || r.status != 200)
+    return {};
 
-  const LANGID sys_locale = GetSystemDefaultLangID();
-  if (PRIMARYLANGID(sys_locale) == LANG_RUSSIAN)
-    return true;
-
-  return false;
+  // Accept only known CDN values, never an arbitrary host from the body.
+  for (const char *candidate : {CDN_AUTHORITY_RU, CDN_AUTHORITY_DEFAULT}) {
+    if (r.body.find(std::string("\"") + candidate + "\"") != std::string::npos)
+      return candidate;
+  }
+  return {};
 }
 
 static std::string get_cdn_authority() {
-  return is_russian_language() ? "https://cdn.orion-security.su"
-                               : "https://cdn.orion-security.pro";
+  if (std::string by_ip = fetch_cdn_authority_by_ip(); !by_ip.empty())
+    return by_ip;
+  return is_russian_language() ? CDN_AUTHORITY_RU : CDN_AUTHORITY_DEFAULT;
 }
 
 static void synchronize_windows_time() noexcept {
-  try {
-    wchar_t system_directory[MAX_PATH]{};
-    const UINT length = GetSystemDirectoryW(system_directory, MAX_PATH);
-    if (length == 0 || length >= MAX_PATH)
-      return;
+  wchar_t system_directory[MAX_PATH]{};
+  const UINT length = GetSystemDirectoryW(system_directory, MAX_PATH);
+  if (length == 0 || length >= MAX_PATH)
+    return;
 
-    const auto w32tm_path =
-        std::filesystem::path(system_directory) / L"w32tm.exe";
-    (void)loader::run_hidden_process(w32tm_path, L"/resync",
-                                     std::chrono::seconds(10));
-  } catch (...) {
-    // Time synchronization is optional and must never block loader startup.
-  }
+  const auto w32tm_path =
+      std::filesystem::path(system_directory) / L"w32tm.exe";
+  (void)loader::run_hidden_process(w32tm_path, L"/resync",
+                                   std::chrono::seconds(10));
 }
 
 // ---------------------------------------------------------------------------
