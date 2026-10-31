@@ -7,7 +7,7 @@ import { LauncherRedesign } from '@/components/LauncherRedesign';
 import { LegacyLauncherNotice } from '@/components/LegacyLauncherNotice';
 import { AuthScreen } from '@/components/AuthScreen';
 import { Splash } from '@/components/Splash';
-import { ipc, AppItem, LauncherProfile, ChangelogItem } from '@/lib/ipc';
+import { ipc, AppItem, LauncherProfile, ChangelogItem, productIdOf } from '@/lib/ipc';
 import { MOCK_ENABLED, mockParam } from '@/lib/mock';
 
 function MainLauncherContent() {
@@ -85,7 +85,7 @@ function MainLauncherContent() {
   };
 
   // The changelog shown is the one of the first app, for the build the account runs.
-  const primaryProductId = apps[0]?.product_id ?? '';
+  const primaryProductId = productIdOf(apps[0], user);
   const primaryBuild = user?.builds?.find((b) => b.product_id === primaryProductId)?.selected ?? '';
   useEffect(() => {
     if (!token || !primaryProductId) return;

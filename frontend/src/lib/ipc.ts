@@ -94,6 +94,14 @@ export interface ChangelogItem {
   created_at: string;
 }
 
+// The product an app belongs to. Some backends leave product_id out of the app
+// list; with a single owned product the profile still names it.
+export function productIdOf(app: AppItem | null | undefined, user: LauncherProfile | null): string {
+  if (!app) return '';
+  if (app.product_id) return app.product_id;
+  return user?.builds?.length === 1 ? user.builds[0].product_id : '';
+}
+
 declare global {
   interface Window {
     saucer?: {

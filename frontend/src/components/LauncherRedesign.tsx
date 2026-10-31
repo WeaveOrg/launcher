@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useState } from 'react';
-import { ipc, AppItem, LauncherProfile, ChangelogItem } from '../lib/ipc';
+import { ipc, AppItem, LauncherProfile, ChangelogItem, productIdOf } from '../lib/ipc';
 import { Play, User } from 'lucide-react';
 import { WeaveMark } from './WeaveMark';
 import { TitleBar, WindowShell } from './WindowChrome';
@@ -43,10 +43,11 @@ export const LauncherRedesign: React.FC<LauncherRedesignProps> = ({
   const [switching, setSwitching] = useState(false);
 
   const activeApp: AppItem | null = safeApps.length > 0 ? safeApps[0] : null;
-  const activeProductBuilds = user.builds?.find((b) => b.product_id === activeApp?.product_id);
+  const activeProductId = productIdOf(activeApp, user);
+  const activeProductBuilds = user.builds?.find((b) => b.product_id === activeProductId);
   const buildOptions = activeProductBuilds?.available ?? [];
   const selectedBuild = activeProductBuilds?.selected ?? 'stable';
-  const showBuildSelector = Boolean(activeApp?.product_id) && buildOptions.length > 1;
+  const showBuildSelector = Boolean(activeProductId) && buildOptions.length > 1;
 
   const changeBuild = async (productId: string, next: string) => {
     if (next === selectedBuild || switching) return;
@@ -154,7 +155,7 @@ export const LauncherRedesign: React.FC<LauncherRedesignProps> = ({
           </span>
         )}
         {/* Build selector, shown when the app has builds besides stable */}
-        {showBuildSelector && activeApp?.product_id && (
+        {showBuildSelector && (
           <div
             role="radiogroup"
             aria-label="Build"
@@ -168,7 +169,7 @@ export const LauncherRedesign: React.FC<LauncherRedesignProps> = ({
                   type="button"
                   role="radio"
                   aria-checked={selected}
-                  onClick={() => changeBuild(activeApp.product_id ?? '', option.slug)}
+                  onClick={() => changeBuild(activeProductId, option.slug)}
                   disabled={switching}
                   className={`rounded-full px-3 py-1 text-[11px] font-semibold transition disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent ${
                     selected
