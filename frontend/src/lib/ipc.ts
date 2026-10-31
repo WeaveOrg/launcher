@@ -4,7 +4,10 @@
 import { MOCK_ENABLED, mockApps, mockLaunch } from './mock';
 
 export interface AppItem {
+  // Loader id of the build the account launches.
   id: string;
+  // Product the app belongs to. Builds and changelogs are keyed by it.
+  product_id?: string;
   name: string;
   subtitle: string;
   category: string;
@@ -51,12 +54,26 @@ export interface NewsItem {
   content: string;
 }
 
+export interface BuildOption {
+  slug: string;
+  label: string;
+}
+
+// The builds of one product the account may run. selected is the build the
+// launcher starts; available always starts with stable.
+export interface ProductBuilds {
+  product_id: string;
+  selected: string;
+  available: BuildOption[];
+}
+
 export interface LauncherProfile {
   id: string;
   username: string;
   avatar: string;
-  // Release channel the account launches on, and whether the beta channel is
-  // unlocked for this account. The channel toggle is only shown when beta_access.
+  builds?: ProductBuilds[];
+  // Retired beta switch, still sent for launchers that predate builds. This
+  // launcher reads builds instead.
   channel?: 'stable' | 'beta';
   beta_access?: boolean;
   // The site records the last build it prepared for this account. These fields
@@ -70,6 +87,7 @@ export interface LauncherProfile {
 export interface ChangelogItem {
   id: string;
   product_id: string;
+  build?: string;
   version: string;
   title: string;
   content: string;
@@ -138,6 +156,17 @@ class WeaveIPCBridge {
   }
 
   // Window Controls for Frameless Saucer / Native Window
+  public async notifyLauncherReady(): Promise<void> {
+    // The same frontend also runs in ordinary browsers and older launchers.
+    if (typeof window === 'undefined' || !window.saucer) return;
+    try {
+      const saucer = await import('@saucer-dev/types');
+      await saucer.call<boolean>('launcher_ready', []);
+    } catch (error) {
+      console.warn('Could not notify native launcher readiness', error);
+    }
+  }
+
   public startDrag() {
     import('@saucer-dev/types').then(saucer => {
       saucer.startDrag().catch(() => {});
@@ -226,23 +255,24 @@ class WeaveIPCBridge {
   }
 
   // Fetch Catalog Apps (Products)
-  public async getApps(): Promise<AppItem[]> {
+  public async getApps(signal?: AbortSignal): Promise<AppItem[]> {
     if (MOCK_ENABLED) {
       return mockApps;
     }
-    try {
-      const token = typeof window !== 'undefined' ? localStorage.getItem('launcher_token') || '' : '';
-      const res = await fetch(`${BACKEND_URL}/api/v1/products?token=${encodeURIComponent(token)}`);
-      const data = await res.json();
-      
-      const productsList = data.products || data.apps;
-      if (data.success && productsList) {
-        return productsList;
-      }
-    } catch (e) {
-      console.warn('Failed to fetch products from backend');
+    const token = typeof window !== 'undefined' ? localStorage.getItem('launcher_token') || '' : '';
+    const res = await fetch(`${BACKEND_URL}/api/v1/products?token=${encodeURIComponent(token)}`, {
+      cache: 'no-store',
+      signal: signal
+        ? AbortSignal.any([signal, AbortSignal.timeout(15_000)])
+        : AbortSignal.timeout(15_000),
+    });
+    if (!res.ok) throw new Error(`Catalog request failed (${res.status})`);
+    const data = await res.json();
+    const productsList = data.products || data.apps;
+    if (data.success && Array.isArray(productsList)) {
+      return productsList;
     }
-    return [];
+    throw new Error('Catalog response did not contain a valid product list');
   }
 
   // Fetch News Feed
@@ -311,18 +341,43 @@ class WeaveIPCBridge {
     }
   }
 
-  // Proxy API: Get Changelogs
-  public async getChangelogs(productId?: string, token?: string): Promise<ChangelogItem[]> {
+  // Proxy API: choose the build the launcher starts for one product. The backend
+  // refuses a closed build the account holds no grant for. The new build applies
+  // at the next launch, since the loader reads the app id at start.
+  public async setBuild(productId: string, build: string, token?: string): Promise<boolean> {
+    const launcherToken = token || (typeof window !== 'undefined' ? localStorage.getItem('launcher_token') || '' : '');
+    try {
+      const query = launcherToken ? `?token=${encodeURIComponent(launcherToken)}` : '';
+      const res = await fetch(`/api/launcher/build${query}`, {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-Launcher-Token': launcherToken,
+        },
+        body: JSON.stringify({ product_id: productId, build }),
+      });
+      return res.ok;
+    } catch (e) {
+      console.warn('Failed to set build via proxy', e);
+      return false;
+    }
+  }
+
+  // Proxy API: Get Changelogs of one build. Without a build the backend answers
+  // with the notes of the build the account launches.
+  public async getChangelogs(productId?: string, build?: string, token?: string): Promise<ChangelogItem[]> {
     const launcherToken = token || (typeof window !== 'undefined' ? localStorage.getItem('launcher_token') || '' : '');
     try {
       const params = new URLSearchParams();
       if (productId) params.set('product_id', productId);
+      if (build) params.set('build', build);
       if (launcherToken) {
         params.set('token', launcherToken);
         params.set('launcher_token', launcherToken);
       }
       const query = params.toString() ? `?${params.toString()}` : '';
       const res = await fetch(`/api/launcher/changelogs${query}`, {
+        signal: AbortSignal.timeout(15_000),
         headers: {
           'X-Launcher-Token': launcherToken
         }

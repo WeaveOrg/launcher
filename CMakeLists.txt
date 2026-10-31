@@ -49,6 +49,7 @@ if(WIN32)
         iphlpapi
         advapi32
         user32
+        comctl32
         gdi32
         shell32
         ole32
@@ -93,6 +94,10 @@ FetchContent_MakeAvailable(saucer-loop)
 target_link_libraries(weave_launcher PRIVATE saucer::saucer saucer::loop)
 
 if(BUILD_TESTING)
+    add_executable(launcher_startup_state_test tests/launcher_startup_state_test.cpp)
+    target_include_directories(launcher_startup_state_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)
+    add_test(NAME launcher_startup_state_test COMMAND launcher_startup_state_test)
+
     add_executable(http_download_client_test
         tests/http_download_client_test.cpp
     )

@@ -13,7 +13,7 @@ interface LauncherRedesignProps {
   changelogs: ChangelogItem[];
   onLaunch: (app: AppItem) => void;
   onLogout: () => void;
-  onChannelChanged?: (channel: 'stable' | 'beta') => void | Promise<void>;
+  onBuildChanged?: (productId: string, build: string) => void | Promise<void>;
 }
 
 function formatDate(iso?: string) {
@@ -29,7 +29,7 @@ export const LauncherRedesign: React.FC<LauncherRedesignProps> = ({
   token,
   changelogs,
   onLaunch,
-  onChannelChanged,
+  onBuildChanged,
 }) => {
   const safeApps = Array.isArray(apps) ? apps : [];
   // Backend returns entries oldest-first; the timeline expects the newest
@@ -38,31 +38,24 @@ export const LauncherRedesign: React.FC<LauncherRedesignProps> = ({
     (a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
   );
 
-  // Release channel. The toggle is only rendered when the account holds beta
-  // access; the switch persists server-side and takes effect on the next launch
-  // (the loader reads its product id at start).
-  const [channel, setChannel] = useState<'stable' | 'beta'>(
-    user.channel === 'beta' ? 'beta' : 'stable'
-  );
+  // Build selector for the app shown first. The choice persists server-side and
+  // takes effect on the next launch (the loader reads the app id at start).
   const [switching, setSwitching] = useState(false);
 
-  const changeChannel = async (next: 'stable' | 'beta') => {
-    if (next === channel || switching) return;
+  const activeApp: AppItem | null = safeApps.length > 0 ? safeApps[0] : null;
+  const activeProductBuilds = user.builds?.find((b) => b.product_id === activeApp?.product_id);
+  const buildOptions = activeProductBuilds?.available ?? [];
+  const selectedBuild = activeProductBuilds?.selected ?? 'stable';
+  const showBuildSelector = Boolean(activeApp?.product_id) && buildOptions.length > 1;
+
+  const changeBuild = async (productId: string, next: string) => {
+    if (next === selectedBuild || switching) return;
     setSwitching(true);
-    const prev = channel;
-    setChannel(next); // optimistic
-    const ok = await ipc.setChannel(next, token);
-    if (!ok) {
-      setChannel(prev); // revert on failure
-    } else {
-      // Refresh the product list so the id injected on the next Launch matches
-      // the new channel; without this Launch would still use the stale id.
-      await onChannelChanged?.(next);
-    }
+    const ok = await ipc.setBuild(productId, next, token);
+    // Refresh the list so the app id injected on the next Launch matches the build.
+    if (ok) await onBuildChanged?.(productId, next);
     setSwitching(false);
   };
-
-  const activeApp: AppItem | null = safeApps.length > 0 ? safeApps[0] : null;
   const canLaunch = Boolean(activeApp) && activeApp?.status !== 'Maintenance' && activeApp?.status !== 'Frozen';
 
   return (
@@ -93,7 +86,14 @@ export const LauncherRedesign: React.FC<LauncherRedesignProps> = ({
       {/* MAIN: changelog timeline */}
       <main className="flex-1 overflow-y-auto px-6 pb-4 pt-4">
         <div className="mx-auto flex w-full max-w-3xl flex-col gap-3">
-          <h2 className="text-sm font-semibold text-fg-0">Changelog</h2>
+          <div className="flex items-baseline gap-2">
+            <h2 className="text-sm font-semibold text-fg-0">Changelog</h2>
+            {selectedBuild !== 'stable' && (
+              <span className="rounded-full bg-accent/15 px-1.5 py-px text-[10px] font-semibold uppercase tracking-wide text-accent">
+                {buildOptions.find((o) => o.slug === selectedBuild)?.label ?? selectedBuild}
+              </span>
+            )}
+          </div>
 
           {safeChangelogs.length > 0 ? (
             <ol className="relative flex flex-col gap-4 before:absolute before:bottom-2 before:left-[5px] before:top-2 before:w-px before:bg-line">
@@ -153,32 +153,32 @@ export const LauncherRedesign: React.FC<LauncherRedesignProps> = ({
             Subscription frozen · cannot launch
           </span>
         )}
-        {/* Release channel toggle — shown only when the account has beta access */}
-        {user.beta_access && (
+        {/* Build selector, shown when the app has builds besides stable */}
+        {showBuildSelector && activeApp?.product_id && (
           <div
             role="radiogroup"
-            aria-label="Release channel"
+            aria-label="Build"
             className="no-drag ml-auto flex items-center rounded-full border border-line bg-ink-2 p-0.5"
           >
-            {(['stable', 'beta'] as const).map((ch) => {
-              const selected = channel === ch;
+            {buildOptions.map((option) => {
+              const selected = selectedBuild === option.slug;
               return (
                 <button
-                  key={ch}
+                  key={option.slug}
                   type="button"
                   role="radio"
                   aria-checked={selected}
-                  onClick={() => changeChannel(ch)}
+                  onClick={() => changeBuild(activeApp.product_id ?? '', option.slug)}
                   disabled={switching}
-                  className={`rounded-full px-3 py-1 text-[11px] font-semibold capitalize transition disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent ${
+                  className={`rounded-full px-3 py-1 text-[11px] font-semibold transition disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent ${
                     selected
-                      ? ch === 'beta'
-                        ? 'bg-accent text-accent-fg'
-                        : 'bg-ink-3 text-fg-0'
+                      ? option.slug === 'stable'
+                        ? 'bg-ink-3 text-fg-0'
+                        : 'bg-accent text-accent-fg'
                       : 'text-fg-2 hover:text-fg-0'
                   }`}
                 >
-                  {ch}
+                  {option.label}
                 </button>
               );
             })}
@@ -189,7 +189,7 @@ export const LauncherRedesign: React.FC<LauncherRedesignProps> = ({
           type="button"
           onClick={() => { if (activeApp) onLaunch(activeApp); }}
           disabled={!canLaunch}
-          className={`${user.beta_access ? '' : 'ml-auto'} flex h-10 items-center gap-2 rounded-full bg-accent px-7 text-[13px] font-bold uppercase tracking-wide text-accent-fg shadow-[0_0_18px_rgba(255,140,0,0.25)] transition hover:bg-accent-hover active:scale-[0.97] disabled:cursor-not-allowed disabled:opacity-40 disabled:shadow-none focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-2 focus-visible:ring-offset-ink-1`}
+          className={`${showBuildSelector ? '' : 'ml-auto'} flex h-10 items-center gap-2 rounded-full bg-accent px-7 text-[13px] font-bold uppercase tracking-wide text-accent-fg shadow-[0_0_18px_rgba(255,140,0,0.25)] transition hover:bg-accent-hover active:scale-[0.97] disabled:cursor-not-allowed disabled:opacity-40 disabled:shadow-none focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-2 focus-visible:ring-offset-ink-1`}
         >
           <Play className="size-3.5 fill-current" aria-hidden="true" />
           Launch

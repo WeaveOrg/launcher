@@ -25,6 +25,7 @@
 #include <saucer/modules/loop.hpp>
 #include <saucer/window.hpp>
 #include <saucer/modules/stable/webview2.hpp>
+#include "launcher_startup.hpp"
 
 #define LAUNCHER_URL "https://launcher.weave.su"
 
@@ -131,10 +132,20 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR lpCmdLine, int nCmdShow
         return loader::fetch_and_inject(app_id, token);
     });
 
+    launcher::Startup startup(webview, window, target_url);
+    if (FAILED(startup.initialize())) {
+        MessageBoxW(nullptr, L"Could not initialize the launcher window.", L"Weave Launcher", MB_OK | MB_ICONERROR);
+        return 1;
+    }
+    webview.expose("launcher_ready", [&startup]() -> bool {
+        return startup.frontend_ready();
+    });
+
+    // Keep the window hidden until the current navigation succeeds and the
+    // frontend confirms that its initial API requests and React commit finished.
     webview.set_url(target_url);
     
-    window->show();
-    
     loop.run();
+    webview.unexpose("launcher_ready");
     return 0;
 }

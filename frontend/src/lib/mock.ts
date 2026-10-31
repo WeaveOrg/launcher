@@ -10,8 +10,16 @@ export const mockProfile: LauncherProfile = {
   id: 'usr_mock_1',
   username: 'macan',
   avatar: '',
-  channel: 'stable',
-  beta_access: true,
+  builds: [
+    {
+      product_id: '6a943ac671805d202d5fc1e0',
+      selected: 'stable',
+      available: [
+        { slug: 'stable', label: 'Stable' },
+        { slug: 'beta', label: 'Beta' },
+      ],
+    },
+  ],
   latest_launcher_version: '1.4.2',
   launcher_downloaded_version: '1.4.2',
   launcher_update_required: false,
@@ -30,8 +38,8 @@ export const mockChangelogs: ChangelogItem[] = [
     id: 'cl_2',
     product_id: '6a943ac671805d202d5fc1e0',
     version: '1.4.1',
-    title: 'Beta channel',
-    content: 'Accounts with beta access can now switch channels from the launcher. Improved proxy detection and HTTP failure reporting.',
+    title: 'Build selector',
+    content: 'Accounts with a granted build can pick it from the launcher footer. Improved proxy detection and HTTP failure reporting.',
     created_at: '2026-09-10T10:30:00Z',
   },
   {
@@ -47,6 +55,7 @@ export const mockChangelogs: ChangelogItem[] = [
 export const mockApps: AppItem[] = [
   {
     id: '6a943ac671805d202d5fc1e0',
+    product_id: '6a943ac671805d202d5fc1e0',
     name: 'Weave CS2',
     subtitle: 'Counter-Strike 2',
     category: 'FPS',
@@ -64,6 +73,7 @@ export const mockApps: AppItem[] = [
   },
   {
     id: 'prod_rust',
+    product_id: 'prod_rust',
     name: 'Weave Rust',
     subtitle: 'Rust',
     category: 'Survival',
@@ -81,6 +91,7 @@ export const mockApps: AppItem[] = [
   },
   {
     id: 'prod_apex',
+    product_id: 'prod_apex',
     name: 'Weave Apex',
     subtitle: 'Apex Legends',
     category: 'FPS',
