@@ -1,13 +1,13 @@
 'use client';
 
-import React, { useState, useEffect, Suspense } from 'react';
+import React, { useState, useEffect, useCallback, useRef, Suspense } from 'react';
 import { useSearchParams } from 'next/navigation';
 import { LaunchModal } from '@/components/LaunchModal';
 import { LauncherRedesign } from '@/components/LauncherRedesign';
 import { LegacyLauncherNotice } from '@/components/LegacyLauncherNotice';
 import { AuthScreen } from '@/components/AuthScreen';
 import { Splash } from '@/components/Splash';
-import { ipc, AppItem, LauncherProfile, ChangelogItem } from '@/lib/ipc';
+import { ipc, AppItem, LauncherProfile, ChangelogItem, productIdOf } from '@/lib/ipc';
 import { MOCK_ENABLED, mockParam } from '@/lib/mock';
 
 function MainLauncherContent() {
@@ -19,53 +19,84 @@ function MainLauncherContent() {
   const [apps, setApps] = useState<AppItem[]>([]);
   const [changelogs, setChangelogs] = useState<ChangelogItem[]>([]);
   const [activeLaunchApp, setActiveLaunchApp] = useState<AppItem | null>(null);
+  const [ready, setReady] = useState(false);
+  const initialLoad = useRef<AbortController | null>(null);
+
+  useEffect(() => () => initialLoad.current?.abort(), []);
+
+  // This effect runs after React commits the ready screen to the DOM. Avoid
+  // requestAnimationFrame here: a hidden WebView can suspend animation frames.
+  useEffect(() => {
+    if (ready) void ipc.notifyLauncherReady();
+  }, [ready]);
+
+  const handleAuthScreenReady = useCallback(() => setReady(true), []);
+
+  // Re-fetch apps after a build switch: each build carries its own app id.
+  const refreshApps = useCallback(async (signal?: AbortSignal): Promise<boolean> => {
+    try {
+      const fetchedApps = await ipc.getApps(signal);
+      if (signal?.aborted) return false;
+      setApps(Array.isArray(fetchedApps) ? fetchedApps : []);
+      return true;
+    } catch (e) {
+      if (signal?.aborted) return false;
+      console.warn('Could not load apps list', e);
+      setApps([]);
+      return false;
+    }
+  }, []);
 
   // When auth succeeds with verified profile and token
-  const handleAuthSuccess = async (verifiedUser: LauncherProfile, authToken: string) => {
+  const handleAuthSuccess = useCallback(async (verifiedUser: LauncherProfile, authToken: string) => {
+    initialLoad.current?.abort();
+    const controller = new AbortController();
+    initialLoad.current = controller;
+    setReady(false);
     setUser(verifiedUser);
     setToken(authToken);
 
     // Stale launchers must go directly to the site download page. Avoid
     // loading game data that cannot be used while this mandatory gate is shown.
     if (verifiedUser.launcher_update_required) {
+      setReady(true);
       return;
     }
 
-    // Fetch changelogs for product 6a943ac671805d202d5fc1e0 from backend API
-    try {
-      const logs = await ipc.getChangelogs('6a943ac671805d202d5fc1e0', authToken);
-      if (Array.isArray(logs) && logs.length > 0) {
-        setChangelogs(logs);
-      } else {
-        setChangelogs([]);
+    // A successful empty catalog is valid; a network failure is not readiness.
+    while (!controller.signal.aborted) {
+      const loaded = await refreshApps(controller.signal);
+      if (controller.signal.aborted) return;
+      if (loaded) {
+        setReady(true);
+        return;
       }
-    } catch (e) {
-      console.warn('Could not load dynamic changelogs', e);
-      setChangelogs([]);
+      await new Promise<void>((resolve) => setTimeout(resolve, 3000));
     }
+  }, [refreshApps]);
 
-    // Fetch apps
+  // Called by the build selector once the choice is stored. The new build may
+  // carry another app id, so the list is fetched again.
+  const handleBuildChanged = async (productId: string, build: string) => {
+    setUser((prev) => (prev && prev.builds
+      ? { ...prev, builds: prev.builds.map((b) => (b.product_id === productId ? { ...b, selected: build } : b)) }
+      : prev));
     await refreshApps();
   };
 
-  // Re-fetch the product list. The ids it returns are channel-aware (the
-  // backend hands beta accounts the beta build's id), so this must run after
-  // the channel changes — otherwise Launch would inject the stale stable id.
-  const refreshApps = async () => {
-    try {
-      const fetchedApps = await ipc.getApps();
-      setApps(Array.isArray(fetchedApps) ? fetchedApps : []);
-    } catch (e) {
-      console.warn('Could not load apps list', e);
-      setApps([]);
-    }
-  };
-
-  // Called by the launcher's channel toggle once the switch is persisted.
-  const handleChannelChanged = async (channel: 'stable' | 'beta') => {
-    setUser((prev) => (prev ? { ...prev, channel } : prev));
-    await refreshApps();
-  };
+  // The changelog shown is the one of the first app, for the build the account runs.
+  const primaryProductId = productIdOf(apps[0], user);
+  const primaryBuild = user?.builds?.find((b) => b.product_id === primaryProductId)?.selected ?? '';
+  useEffect(() => {
+    if (!token || !primaryProductId) return;
+    let cancelled = false;
+    ipc.getChangelogs(primaryProductId, primaryBuild || undefined, token).then((logs) => {
+      if (!cancelled) setChangelogs(logs);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [token, primaryProductId, primaryBuild]);
 
   // Mock mode: `?mock_open=launch` opens the launch modal as soon as the
   // product list is in, so every modal state can be screenshotted headlessly.
@@ -76,11 +107,13 @@ function MainLauncherContent() {
   }, [apps]);
 
   const handleLogout = () => {
+    initialLoad.current?.abort();
     if (typeof window !== 'undefined') {
       localStorage.removeItem('launcher_token');
     }
     setUser(null);
     setToken(null);
+    setReady(false);
   };
 
   if (!user || !token) {
@@ -88,6 +121,7 @@ function MainLauncherContent() {
       <AuthScreen 
         initialToken={queryToken} 
         onSuccess={handleAuthSuccess} 
+        onReady={handleAuthScreenReady}
       />
     );
   }
@@ -105,7 +139,7 @@ function MainLauncherContent() {
         changelogs={changelogs}
         onLaunch={(app) => setActiveLaunchApp(app)}
         onLogout={handleLogout}
-        onChannelChanged={handleChannelChanged}
+        onBuildChanged={handleBuildChanged}
       />
 
       <LaunchModal

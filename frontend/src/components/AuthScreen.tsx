@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { ShieldAlert, RefreshCw, AlertCircle } from 'lucide-react';
 import { ipc, LauncherProfile } from '@/lib/ipc';
 import { motion } from 'framer-motion';
@@ -11,15 +11,29 @@ import { Splash } from './Splash';
 interface AuthScreenProps {
   initialToken?: string | null;
   onSuccess: (user: LauncherProfile, token: string) => void;
+  onReady?: () => void;
 }
 
-export const AuthScreen: React.FC<AuthScreenProps> = ({ initialToken, onSuccess }) => {
+export const AuthScreen: React.FC<AuthScreenProps> = ({ initialToken, onSuccess, onReady }) => {
   const [error, setError] = useState<string>('');
   const [errorDetails, setErrorDetails] = useState<any>(null);
   const [loading, setLoading] = useState<boolean>(true);
   const [currentToken, setCurrentToken] = useState<string>('');
+  const retryTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const activeRequest = useRef<AbortController | null>(null);
+  const [retrying, setRetrying] = useState(false);
 
   const verifyToken = useCallback(async (targetToken: string) => {
+    if (retryTimer.current !== null) clearTimeout(retryTimer.current);
+    retryTimer.current = null;
+    activeRequest.current?.abort();
+    const controller = new AbortController();
+    activeRequest.current = controller;
+
+    const scheduleRetry = () => {
+      setRetrying(true);
+      retryTimer.current = setTimeout(() => { void verifyToken(targetToken); }, 3000);
+    };
     if (!targetToken) {
       setError('Session Not Found');
       setErrorDetails({
@@ -32,19 +46,24 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ initialToken, onSuccess 
 
     try {
       setLoading(true);
+      setRetrying(false);
       setError('');
       setErrorDetails(null);
 
       const res = await fetch(`/api/launcher/profile?token=${encodeURIComponent(targetToken)}`, {
         method: 'GET',
+        cache: 'no-store',
+        signal: AbortSignal.any([controller.signal, AbortSignal.timeout(15_000)]),
         headers: {
           'X-Launcher-Token': targetToken,
           'Accept': 'application/json'
         }
       });
 
+      const profileData = await res.json().catch(() => null);
+      if (controller.signal.aborted) return;
+
       if (res.ok) {
-        const profileData: LauncherProfile = await res.json();
         if (profileData && profileData.id) {
           if (typeof window !== 'undefined') {
             localStorage.setItem('launcher_token', targetToken);
@@ -54,7 +73,14 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ initialToken, onSuccess 
         }
       }
 
-      const errData = await res.json().catch(() => null);
+      // Keep trying transient failures while the native startup window is
+      // hidden. A rejected session is terminal and must remain visible.
+      if (res.status >= 500 || res.status === 408 || res.status === 429 || res.ok) {
+        scheduleRetry();
+        return;
+      }
+
+      const errData = profileData;
       setError(errData?.error || 'Authentication Failed');
       setErrorDetails({
         status: res.status,
@@ -66,16 +92,19 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ initialToken, onSuccess 
           ? 'Cannot connect to backend server. Check server status or internet connection.' 
           : 'Backend returned an error status code.'
       });
-    } catch (err: any) {
-      setError('Connection Error');
-      setErrorDetails({
-        message: err?.message || 'Network error connecting to auth server.',
-        hint: 'Ensure your server is online and backend API is reachable.'
-      });
+    } catch {
+      if (controller.signal.aborted) return;
+      scheduleRetry();
     } finally {
-      setLoading(false);
+      if (!controller.signal.aborted) setLoading(false);
     }
   }, [onSuccess]);
+
+  useEffect(() => {
+    // Notify only after the terminal auth screen has been committed, never
+    // for a temporary connection error or a pending retry.
+    if (!loading && !retrying && error) onReady?.();
+  }, [loading, retrying, error, onReady]);
 
   useEffect(() => {
     const urlParams = typeof window !== 'undefined' ? new URLSearchParams(window.location.search) : null;
@@ -93,6 +122,11 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ initialToken, onSuccess 
       });
       setLoading(false);
     }
+
+    return () => {
+      activeRequest.current?.abort();
+      if (retryTimer.current !== null) clearTimeout(retryTimer.current);
+    };
   }, [initialToken, verifyToken]);
 
   const resolveToken = () => {
@@ -108,8 +142,8 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ initialToken, onSuccess 
     if (t) verifyToken(t);
   };
 
-  if (loading) {
-    return <Splash label="Checking your session" />;
+  if (loading || retrying) {
+    return <Splash label={retrying ? 'Connecting to server' : 'Checking your session'} />;
   }
 
   return (
