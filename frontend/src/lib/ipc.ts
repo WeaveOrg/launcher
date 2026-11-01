@@ -243,6 +243,11 @@ class WeaveIPCBridge {
         body: JSON.stringify({ licenseKey, username, hwid })
       });
       const data = await res.json();
+      // The backend answers a banned account with ACCOUNT_BANNED, so the launcher
+      // says so instead of showing the generic failure.
+      if (data?.code === 'ACCOUNT_BANNED') {
+        return { success: false, message: 'This account is banned.' };
+      }
       return data;
     } catch (e: any) {
       console.warn('Backend server unreachable, using offline developer profile', e);
@@ -274,6 +279,10 @@ class WeaveIPCBridge {
         ? AbortSignal.any([signal, AbortSignal.timeout(15_000)])
         : AbortSignal.timeout(15_000),
     });
+    if (res.status === 403) {
+      const denied = await res.json().catch(() => null);
+      if (denied?.code === 'ACCOUNT_BANNED') throw new Error('This account is banned.');
+    }
     if (!res.ok) throw new Error(`Catalog request failed (${res.status})`);
     const data = await res.json();
     const productsList = data.products || data.apps;
